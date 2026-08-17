@@ -8,6 +8,7 @@ import {
   Sliders,
   Bold,
   Italic,
+  Underline,
   CaseSensitive,
   Sparkles,
   ChevronLeft,
@@ -18,7 +19,9 @@ import {
   X,
   ListChecks,
   Trash2,
-  Layers
+  Layers,
+  MoveVertical,
+  CloudFog
 } from 'lucide-react';
 
 interface WordStyleEditorProps {
@@ -261,7 +264,7 @@ export const WordStyleEditor: React.FC<WordStyleEditorProps> = ({
         </div>
       </div>
 
-      {/* 4. Weight, Italic & All-Caps Toggles */}
+      {/* 4. Weight, Italic & Underline Toggles */}
       <div>
         <label className="text-xs font-semibold text-zinc-300 mb-2 block">
           Styling & Emphasis
@@ -297,18 +300,142 @@ export const WordStyleEditor: React.FC<WordStyleEditorProps> = ({
             <span>Italic</span>
           </button>
 
-          {/* All Caps toggle */}
+          {/* Underline toggle */}
           <button
-            onClick={() => onUpdate({ isAllCaps: !primaryWord.isAllCaps })}
+            onClick={() => onUpdate({ textDecoration: primaryWord.textDecoration === 'underline' ? 'none' : 'underline' })}
             className={`flex items-center justify-center gap-1.5 p-2 rounded-xl text-xs font-medium border transition cursor-pointer ${
-              primaryWord.isAllCaps
-                ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold uppercase'
+              primaryWord.textDecoration === 'underline'
+                ? 'bg-amber-500/20 border-amber-500 text-amber-300 underline'
                 : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:bg-zinc-800'
             }`}
           >
-            <CaseSensitive className="w-3.5 h-3.5" />
-            <span>All Caps</span>
+            <Underline className="w-3.5 h-3.5" />
+            <span>Underline</span>
           </button>
+        </div>
+      </div>
+
+      {/* 4b. Text Case / Transform */}
+      <div>
+        <label className="text-xs font-semibold text-zinc-300 mb-2 flex items-center gap-1.5">
+          <CaseSensitive className="w-3.5 h-3.5 text-amber-400" />
+          <span>Text Case</span>
+        </label>
+        <div className="grid grid-cols-4 gap-2">
+          {([
+            { value: 'none', label: 'Aa', title: 'Normal' },
+            { value: 'uppercase', label: 'AA', title: 'UPPERCASE' },
+            { value: 'capitalize', label: 'Aa', title: 'Capitalize' },
+            { value: 'lowercase', label: 'aa', title: 'lowercase' },
+          ] as { value: 'none' | 'uppercase' | 'capitalize' | 'lowercase'; label: string; title: string }[]).map((opt) => {
+            const isSelected = (primaryWord.textTransform ?? 'none') === opt.value;
+            return (
+              <button
+                key={opt.value}
+                onClick={() => onUpdate({ textTransform: opt.value })}
+                title={opt.title}
+                className={`flex flex-col items-center justify-center gap-0.5 p-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                  isSelected
+                    ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                    : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:bg-zinc-800'
+                }`}
+              >
+                <span style={{ textTransform: opt.value === 'none' ? 'none' : opt.value }}>{opt.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 4c. Line Height */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+            <MoveVertical className="w-3.5 h-3.5 text-amber-400" />
+            <span>Line Height ({(primaryWord.lineHeight ?? 1.4).toFixed(1)}x)</span>
+          </label>
+        </div>
+        <input
+          type="range"
+          min="1"
+          max="2.2"
+          step="0.1"
+          value={primaryWord.lineHeight ?? 1.4}
+          onChange={(e) => onUpdate({ lineHeight: Number(e.target.value) })}
+          className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
+        />
+      </div>
+
+      {/* 4d. Text Shadow */}
+      <div className="p-3 bg-black/60 rounded-xl border border-zinc-800 space-y-3">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+            <CloudFog className="w-3.5 h-3.5 text-amber-400" />
+            <span>Text Shadow</span>
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={(primaryWord.shadowColor && primaryWord.shadowColor.startsWith('#')) ? primaryWord.shadowColor : '#000000'}
+              onChange={(e) => onUpdate({ shadowColor: e.target.value })}
+              className="w-5 h-5 rounded cursor-pointer border-0 bg-transparent"
+              title="Shadow Color"
+            />
+            <button
+              onClick={() => onUpdate({ shadowBlur: 0, shadowOffsetX: 0, shadowOffsetY: 0 })}
+              className="text-[11px] text-amber-400 hover:underline cursor-pointer"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <div className="flex items-center justify-between text-[11px] text-zinc-400 mb-1">
+              <span>Blur</span>
+              <span>{primaryWord.shadowBlur ?? 0}px</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="24"
+              step="1"
+              value={primaryWord.shadowBlur ?? 0}
+              onChange={(e) => onUpdate({ shadowBlur: Number(e.target.value) })}
+              className="w-full accent-amber-500 bg-zinc-800 h-1.5 rounded-lg cursor-pointer"
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-[11px] text-zinc-400 mb-1">
+              <span>Offset X</span>
+              <span>{primaryWord.shadowOffsetX ?? 0}px</span>
+            </div>
+            <input
+              type="range"
+              min="-20"
+              max="20"
+              step="1"
+              value={primaryWord.shadowOffsetX ?? 0}
+              onChange={(e) => onUpdate({ shadowOffsetX: Number(e.target.value) })}
+              className="w-full accent-amber-500 bg-zinc-800 h-1.5 rounded-lg cursor-pointer"
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-[11px] text-zinc-400 mb-1">
+              <span>Offset Y</span>
+              <span>{primaryWord.shadowOffsetY ?? 0}px</span>
+            </div>
+            <input
+              type="range"
+              min="-20"
+              max="20"
+              step="1"
+              value={primaryWord.shadowOffsetY ?? 0}
+              onChange={(e) => onUpdate({ shadowOffsetY: Number(e.target.value) })}
+              className="w-full accent-amber-500 bg-zinc-800 h-1.5 rounded-lg cursor-pointer"
+            />
+          </div>
         </div>
       </div>
 
@@ -355,6 +482,54 @@ export const WordStyleEditor: React.FC<WordStyleEditorProps> = ({
             })}
             className="w-full accent-amber-500 bg-zinc-800 h-1.5 rounded-lg cursor-pointer"
           />
+        </div>
+
+        <div className="grid grid-cols-3 gap-3 pt-1">
+          <div>
+            <div className="flex items-center justify-between text-[11px] text-zinc-400 mb-1">
+              <span>Pad X</span>
+              <span>{primaryWord.highlightPaddingX ?? 4}px</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="24"
+              step="1"
+              value={primaryWord.highlightPaddingX ?? 4}
+              onChange={(e) => onUpdate({ highlightPaddingX: Number(e.target.value) })}
+              className="w-full accent-amber-500 bg-zinc-800 h-1.5 rounded-lg cursor-pointer"
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-[11px] text-zinc-400 mb-1">
+              <span>Pad Y</span>
+              <span>{primaryWord.highlightPaddingY ?? 2}px</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="20"
+              step="1"
+              value={primaryWord.highlightPaddingY ?? 2}
+              onChange={(e) => onUpdate({ highlightPaddingY: Number(e.target.value) })}
+              className="w-full accent-amber-500 bg-zinc-800 h-1.5 rounded-lg cursor-pointer"
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-[11px] text-zinc-400 mb-1">
+              <span>Radius</span>
+              <span>{primaryWord.highlightRadius ?? 4}px</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="30"
+              step="1"
+              value={primaryWord.highlightRadius ?? 4}
+              onChange={(e) => onUpdate({ highlightRadius: Number(e.target.value) })}
+              className="w-full accent-amber-500 bg-zinc-800 h-1.5 rounded-lg cursor-pointer"
+            />
+          </div>
         </div>
       </div>
 

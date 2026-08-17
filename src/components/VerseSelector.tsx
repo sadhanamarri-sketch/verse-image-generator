@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ParallelVerse } from '../types';
-import { POPULAR_VERSES } from '../data/verses';
+import { POPULAR_VERSES, BIBLE_BOOKS } from '../data/verses';
 import {
   BookOpen,
   Search,
@@ -29,11 +29,17 @@ export const VerseSelector: React.FC<VerseSelectorProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [isCustomMode, setIsCustomMode] = useState(false);
 
-  // Custom Form Inputs
-  const [customRefTe, setCustomRefTe] = useState('యోహాను 3:16');
-  const [customRefEn, setCustomRefEn] = useState('John 3:16');
+  // Custom Form Inputs — structured Book / Chapter / Verse picker
+  const johnIndex = BIBLE_BOOKS.findIndex((b) => b.en === 'John');
+  const [customBookIndex, setCustomBookIndex] = useState(johnIndex >= 0 ? johnIndex : 0);
+  const [customChapter, setCustomChapter] = useState(3);
+  const [customVerseNum, setCustomVerseNum] = useState('16');
   const [customTeText, setCustomTeText] = useState('దేవుడు లోకమును ఎంతో ప్రేమించెను...');
   const [customEnText, setCustomEnText] = useState('For God so loved the world, that he gave his only begotten Son...');
+
+  const selectedBook = BIBLE_BOOKS[customBookIndex] || BIBLE_BOOKS[0];
+  const customRefTe = `${selectedBook.te} ${customChapter}:${customVerseNum}`;
+  const customRefEn = `${selectedBook.en} ${customChapter}:${customVerseNum}`;
 
   // Extract unique categories
   const categories = ['All', ...Array.from(new Set(POPULAR_VERSES.map(v => v.category)))];
@@ -48,6 +54,14 @@ export const VerseSelector: React.FC<VerseSelectorProps> = ({
       v.teluguBsi.toLowerCase().includes(q);
     return matchesCategory && matchesSearch;
   });
+
+  const handleSelectBook = (idx: number) => {
+    setCustomBookIndex(idx);
+    const book = BIBLE_BOOKS[idx];
+    if (book && customChapter > book.chapters) {
+      setCustomChapter(1);
+    }
+  };
 
   const handleCustomSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -204,32 +218,58 @@ export const VerseSelector: React.FC<VerseSelectorProps> = ({
           /* Mode 2: Custom Verse Input Form */
           <form onSubmit={handleCustomSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
             
-            {/* References */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Book / Chapter / Verse Picker */}
+            <div className="rounded-xl border border-zinc-800 bg-black/40 p-3 space-y-3">
               <div>
                 <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                  Telugu Reference (ఉదా: యోహాను 3:16)
+                  Select Bible Book
                 </label>
-                <input
-                  type="text"
-                  value={customRefTe}
-                  onChange={(e) => setCustomRefTe(e.target.value)}
-                  placeholder="యోహాను 3:16"
-                  className="w-full bg-black border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
-                />
+                <select
+                  value={customBookIndex}
+                  onChange={(e) => handleSelectBook(Number(e.target.value))}
+                  className="w-full bg-black border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                >
+                  {BIBLE_BOOKS.map((b, idx) => (
+                    <option key={b.en} value={idx}>
+                      {b.te} ({b.en})
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                  English Reference (e.g. John 3:16)
-                </label>
-                <input
-                  type="text"
-                  value={customRefEn}
-                  onChange={(e) => setCustomRefEn(e.target.value)}
-                  placeholder="John 3:16"
-                  className="w-full bg-black border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">
+                    Chapter
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={selectedBook.chapters}
+                    value={customChapter}
+                    onChange={(e) => setCustomChapter(Math.max(1, Math.min(selectedBook.chapters, Number(e.target.value) || 1)))}
+                    className="w-full bg-black border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-300 mb-1">
+                    Verse / Range
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 16 or 16-18"
+                    value={customVerseNum}
+                    onChange={(e) => setCustomVerseNum(e.target.value)}
+                    className="w-full bg-black border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              {/* Live reference preview */}
+              <div className="flex items-center gap-2 text-xs pt-1">
+                <span className="text-amber-400 font-bold font-['Noto_Serif_Telugu']">{customRefTe}</span>
+                <span className="text-zinc-600">•</span>
+                <span className="text-amber-300 font-semibold">{customRefEn}</span>
               </div>
             </div>
 

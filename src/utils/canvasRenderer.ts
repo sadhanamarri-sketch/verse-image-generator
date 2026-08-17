@@ -1,9 +1,38 @@
-import { WallpaperConfig, AspectRatioType } from '../types';
+import { WallpaperConfig, AspectRatioType, WordStyle } from '../types';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 
 export interface ExportResolution {
   width: number;
   height: number;
   label: string;
+}
+
+/**
+ * Traces a rounded-rectangle path on the given context (manual implementation
+ * for broad WebView compatibility, since ctx.roundRect isn't universally supported).
+ */
+function roundRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + w - radius, y);
+  ctx.arcTo(x + w, y, x + w, y + radius, radius);
+  ctx.lineTo(x + w, y + h - radius);
+  ctx.arcTo(x + w, y + h, x + w - radius, y + h, radius);
+  ctx.lineTo(x + radius, y + h);
+  ctx.arcTo(x, y + h, x, y + h - radius, radius);
+  ctx.lineTo(x, y + radius);
+  ctx.arcTo(x, y, x + radius, y, radius);
+  ctx.closePath();
 }
 
 export function getResolutionForAspect(aspectRatio: AspectRatioType, quality: 'standard' | 'ultra' = 'standard'): ExportResolution {
@@ -156,8 +185,10 @@ export async function renderWallpaperToCanvas(
   const maxContentWidth = width - (paddingX * 2);
 
   // Measure and layout text items
-  const showTe = config.primaryLanguage === 'telugu' || config.primaryLanguage === 'parallel';
-  const showEn = config.primaryLanguage === 'english' || config.primaryLanguage === 'parallel';
+  const showTe = config.layoutMode !== 'english-only';
+  const showEn = config.layoutMode !== 'telugu-only';
+  const isSideBySide = config.layoutMode === 'side-by-side';
+  const isEnglishFirst = config.layoutMode === 'stacked-en-te';
 
   // Helper for word wrapping with per-word custom styling
   interface WordRenderMeta {
@@ -168,21 +199,43 @@ export async function renderWallpaperToCanvas(
     fontFamily: string;
     fontWeight: string;
     isItalic: boolean;
+    textDecoration?: 'none' | 'underline';
+    lineHeight: number;
     highlightColor?: string;
     highlightOpacity?: number;
+    highlightPaddingX: number;
+    highlightPaddingY: number;
+    highlightRadius: number;
+    shadowColor: string;
+    shadowBlur: number;
+    shadowOffsetX: number;
+    shadowOffsetY: number;
     width: number;
     height: number;
     x?: number;
     y?: number;
   }
 
+  // Applies the word's textTransform (falling back to the legacy isAllCaps
+  // boolean for configs created before textTransform existed).
+  const applyTextTransform = (text: string, w: WordStyle): string => {
+    const transform = w.textTransform ?? (w.isAllCaps ? 'uppercase' : 'none');
+    switch (transform) {
+      case 'uppercase': return text.toUpperCase();
+      case 'lowercase': return text.toLowerCase();
+      case 'capitalize': return text.replace(/\b\w/g, (c) => c.toUpperCase());
+      default: return text;
+    }
+  };
+
   const prepareWords = (words: typeof config.teluguWords): WordRenderMeta[] => {
     return words.map(w => {
       const fontSize = Math.round(w.fontSizeSp * scale);
       const font = `${w.isItalic ? 'italic ' : ''}${w.fontWeight} ${fontSize}px "${w.fontFamily}", sans-serif`;
       ctx.font = font;
-      const textToDraw = w.isAllCaps ? w.text.toUpperCase() : w.text;
+      const textToDraw = applyTextTransform(w.text, w);
       const metrics = ctx.measureText(textToDraw);
+      const lineHeight = w.lineHeight ?? 1.3;
       return {
         text: textToDraw,
         color: w.color,
@@ -191,10 +244,19 @@ export async function renderWallpaperToCanvas(
         fontFamily: w.fontFamily,
         fontWeight: w.fontWeight,
         isItalic: w.isItalic,
+        textDecoration: w.textDecoration ?? 'none',
+        lineHeight,
         highlightColor: w.highlightColor,
         highlightOpacity: w.highlightOpacity,
+        highlightPaddingX: (w.highlightPaddingX ?? 4) * scale,
+        highlightPaddingY: (w.highlightPaddingY ?? 2) * scale,
+        highlightRadius: (w.highlightRadius ?? 4) * scale,
+        shadowColor: w.shadowColor ?? 'rgba(0, 0, 0, 0.65)',
+        shadowBlur: (w.shadowBlur ?? 8) * scale,
+        shadowOffsetX: (w.shadowOffsetX ?? 0) * scale,
+        shadowOffsetY: (w.shadowOffsetY ?? 2) * scale,
         width: metrics.width,
-        height: fontSize * 1.3
+        height: fontSize * lineHeight
       };
     });
   };
@@ -224,8 +286,12 @@ export async function renderWallpaperToCanvas(
   const teluguWordsMeta = showTe ? prepareWords(config.teluguWords) : [];
   const englishWordsMeta = showEn ? prepareWords(config.englishWords) : [];
 
-  const teluguLines = showTe ? layoutParagraph(teluguWordsMeta, maxContentWidth) : [];
-  const englishLines = showEn ? layoutParagraph(englishWordsMeta, maxContentWidth) : [];
+  const columnGap = 24 * scale;
+  const colWidth = (maxContentWidth - columnGap) / 2;
+  const wrapWidth = isSideBySide ? colWidth : maxContentWidth;
+
+  const teluguLines = showTe ? layoutParagraph(teluguWordsMeta, wrapWidth) : [];
+  const englishLines = showEn ? layoutParagraph(englishWordsMeta, wrapWidth) : [];
 
   // Calculate total height needed
   const lineSpacing = 16 * scale;
@@ -241,10 +307,19 @@ export async function renderWallpaperToCanvas(
 
   const teHeight = showTe ? getLinesHeight(teluguLines) : 0;
   const enHeight = showEn ? getLinesHeight(englishLines) : 0;
-  const dividerHeight = (config.showDivider && showTe && showEn) ? 24 * scale : 0;
-  const refHeight = config.referenceStyle.showTeluguRef || config.referenceStyle.showEnglishRef ? 36 * scale : 0;
+  const dividerHeight = (config.showDivider && showTe && showEn && !isSideBySide) ? 24 * scale : 0;
+  const showRef = (config.referenceStyle.showTeluguRef || config.referenceStyle.showEnglishRef)
+    && (!!config.referenceTe || !!config.referenceEn);
+  const isRefOnTop = config.referenceStyle.placement === 'top';
+  const isRefIntegrated = config.referenceStyle.placement === 'integrated';
+  // Integrated mode sits tight against the verse text, like an inline citation,
+  // rather than occupying its own separated block.
+  const refGap = isRefIntegrated ? 6 * scale : 16 * scale;
+  const refHeight = showRef ? (36 * scale) + refGap : 0;
 
-  totalContentHeight = teHeight + enHeight + dividerHeight + refHeight + (showTe && showEn ? sectionSpacing : 0);
+  totalContentHeight = isSideBySide
+    ? Math.max(teHeight, enHeight) + refHeight
+    : teHeight + enHeight + dividerHeight + refHeight + (showTe && showEn ? sectionSpacing : 0);
 
   // Determine starting Y based on vertical alignment
   let currentY = (height - totalContentHeight) / 2;
@@ -254,106 +329,200 @@ export async function renderWallpaperToCanvas(
     currentY = height - totalContentHeight - (height * 0.15);
   }
 
-  // Draw Lines Helper
-  const drawLines = (lines: WordRenderMeta[][]) => {
+  // Draws the reference (citation) badge or plain text, baseline at y. Honors
+  // placement/badge/color/letter-spacing from config.referenceStyle.
+  const drawReferenceBlock = (y: number) => {
+    if (!showRef) return;
+    const refStyle = config.referenceStyle;
+    const parts: string[] = [];
+    if (refStyle.showTeluguRef && config.referenceTe) parts.push(config.referenceTe);
+    if (refStyle.showEnglishRef && config.referenceEn) parts.push(config.referenceEn);
+    const joined = parts.join(' • ');
+    if (!joined) return;
+    // Integrated placement reads as an inline citation woven right after the verse text.
+    const refString = isRefIntegrated ? `— ${joined}` : joined;
+
+    const refFontSize = Math.round(refStyle.fontSizeSp * scale);
+    ctx.font = `${isRefIntegrated ? 'italic ' : ''}${refStyle.fontWeight} ${refFontSize}px "${refStyle.fontFamily}", sans-serif`;
+
+    // Approximate letter-spacing (supported on modern Chromium-based WebViews)
+    const letterSpacingPx = (refStyle.letterSpacing ?? 0.05) * refFontSize;
+    if ('letterSpacing' in ctx) {
+      (ctx as any).letterSpacing = `${letterSpacingPx}px`;
+    }
+
+    const textWidth = ctx.measureText(refString).width;
+    ctx.textAlign = config.referenceAlignment;
+
+    let refX = width / 2;
+    if (config.referenceAlignment === 'left') refX = paddingX;
+    if (config.referenceAlignment === 'right') refX = width - paddingX;
+
+    if (refStyle.showBadge && !isRefIntegrated) {
+      const padX = 14 * scale;
+      const padY = 8 * scale;
+      const badgeWidth = textWidth + padX * 2;
+      const badgeHeight = refFontSize + padY * 2;
+
+      let badgeLeft: number;
+      if (config.referenceAlignment === 'left') badgeLeft = paddingX;
+      else if (config.referenceAlignment === 'right') badgeLeft = width - paddingX - badgeWidth;
+      else badgeLeft = (width - badgeWidth) / 2;
+
+      const badgeTop = y - refFontSize * 0.85 - padY;
+
+      ctx.save();
+      ctx.fillStyle = refStyle.badgeBg || 'rgba(0, 0, 0, 0.6)';
+      ctx.strokeStyle = refStyle.badgeBorder || 'rgba(255, 255, 255, 0.1)';
+      ctx.lineWidth = Math.max(1, scale);
+      roundRectPath(ctx, badgeLeft, badgeTop, badgeWidth, badgeHeight, badgeHeight / 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.save();
+    ctx.fillStyle = refStyle.color || '#FBBF24';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+    ctx.shadowBlur = 6 * scale;
+    ctx.fillText(refString, refX, y);
+    ctx.restore();
+
+    if ('letterSpacing' in ctx) {
+      (ctx as any).letterSpacing = '0px';
+    }
+  };
+
+  // Reference at Top: draw first, then push content down past it
+  if (showRef && isRefOnTop) {
+    const refFontSize = Math.round(config.referenceStyle.fontSizeSp * scale);
+    drawReferenceBlock(currentY + refFontSize * 0.85);
+    currentY += refHeight;
+  }
+
+  // Draw Lines Helper — draws within [regionX, regionX+regionWidth] starting at startY, returns the ending Y
+  const drawLines = (lines: WordRenderMeta[][], startY: number, regionX: number, regionWidth: number): number => {
     const spaceWidth = 10 * scale;
+    let y = startY;
     for (const line of lines) {
       const lineHeight = Math.max(...line.map(w => w.height), 20 * scale);
       const totalLineWidth = line.reduce((sum, w, i) => sum + w.width + (i > 0 ? spaceWidth : 0), 0);
-      
-      let lineStartX = paddingX;
+
+      let lineStartX = regionX;
       if (config.layoutAlignment === 'center') {
-        lineStartX = (width - totalLineWidth) / 2;
+        lineStartX = regionX + (regionWidth - totalLineWidth) / 2;
       } else if (config.layoutAlignment === 'right') {
-        lineStartX = width - paddingX - totalLineWidth;
+        lineStartX = regionX + regionWidth - totalLineWidth;
       }
 
       let curX = lineStartX;
       for (const w of line) {
         ctx.font = w.font;
 
-        // Draw highlight box if present
+        // Draw highlight box if present, honoring per-word padding & corner radius
         if (w.highlightColor && (w.highlightOpacity ?? 0) > 0) {
           ctx.save();
           ctx.fillStyle = w.highlightColor;
           ctx.globalAlpha = w.highlightOpacity || 0.4;
-          const boxPadding = 4 * scale;
-          ctx.fillRect(
-            curX - boxPadding,
-            currentY - (w.fontSize * 0.85),
-            w.width + (boxPadding * 2),
-            w.fontSize * 1.2
-          );
+          const padX = w.highlightPaddingX;
+          const padY = w.highlightPaddingY;
+          const boxX = curX - padX;
+          const boxY = y - (w.fontSize * 0.85) - padY;
+          const boxW = w.width + (padX * 2);
+          const boxH = w.fontSize * 1.2 + (padY * 2);
+          if (w.highlightRadius > 0) {
+            roundRectPath(ctx, boxX, boxY, boxW, boxH, w.highlightRadius);
+            ctx.fill();
+          } else {
+            ctx.fillRect(boxX, boxY, boxW, boxH);
+          }
           ctx.restore();
         }
 
-        // Draw text with subtle shadow for legibility
+        // Draw text with per-word shadow for legibility / user-defined effect
         ctx.save();
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.65)';
-        ctx.shadowBlur = 8 * scale;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 2 * scale;
+        ctx.shadowColor = w.shadowColor;
+        ctx.shadowBlur = w.shadowBlur;
+        ctx.shadowOffsetX = w.shadowOffsetX;
+        ctx.shadowOffsetY = w.shadowOffsetY;
         ctx.fillStyle = w.color;
-        ctx.fillText(w.text, curX, currentY);
+        ctx.fillText(w.text, curX, y);
         ctx.restore();
+
+        // Underline, drawn beneath the text baseline
+        if (w.textDecoration === 'underline') {
+          ctx.save();
+          ctx.strokeStyle = w.color;
+          ctx.lineWidth = Math.max(1, w.fontSize * 0.06);
+          const underlineY = y + w.fontSize * 0.12;
+          ctx.beginPath();
+          ctx.moveTo(curX, underlineY);
+          ctx.lineTo(curX + w.width, underlineY);
+          ctx.stroke();
+          ctx.restore();
+        }
 
         curX += w.width + spaceWidth;
       }
 
-      currentY += lineHeight + lineSpacing;
+      y += lineHeight + lineSpacing;
     }
+    return y;
   };
 
-  // 1. Draw Telugu
-  if (showTe && teluguLines.length > 0) {
-    drawLines(teluguLines);
-  }
+  if (isSideBySide && showTe && showEn) {
+    // Side-by-side: Telugu in the left column, English in the right column
+    const teEndY = teluguLines.length > 0 ? drawLines(teluguLines, currentY, paddingX, colWidth) : currentY;
+    const enEndY = englishLines.length > 0 ? drawLines(englishLines, currentY, paddingX + colWidth + columnGap, colWidth) : currentY;
 
-  // 2. Draw Divider
-  if (config.showDivider && showTe && showEn) {
-    currentY += 8 * scale;
-    ctx.save();
-    ctx.strokeStyle = config.dividerColor || 'rgba(255,255,255,0.4)';
-    ctx.lineWidth = Math.max(2, 2 * scale);
-    const divWidth = Math.min(100 * scale, width * 0.25);
-    const divStartX = (width - divWidth) / 2;
-    ctx.beginPath();
-    ctx.moveTo(divStartX, currentY);
-    ctx.lineTo(divStartX + divWidth, currentY);
-    ctx.stroke();
-    ctx.restore();
-    currentY += 28 * scale;
-  }
-
-  // 3. Draw English
-  if (showEn && englishLines.length > 0) {
-    drawLines(englishLines);
-  }
-
-  // 4. Draw Reference Badge
-  if (config.referenceStyle.showTeluguRef || config.referenceStyle.showEnglishRef) {
-    currentY += 16 * scale;
-    const parts = [];
-    if (config.referenceStyle.showTeluguRef && config.referenceTe) parts.push(config.referenceTe);
-    if (config.referenceStyle.showEnglishRef && config.referenceEn) parts.push(config.referenceEn);
-    const refString = parts.join(' • ');
-
-    if (refString) {
-      const refFontSize = Math.round(config.referenceStyle.fontSizeSp * scale);
-      ctx.font = `${config.referenceStyle.fontWeight} ${refFontSize}px "${config.referenceStyle.fontFamily}", sans-serif`;
-      ctx.fillStyle = config.referenceStyle.color || '#FBBF24';
-      ctx.textAlign = config.referenceAlignment;
-
-      let refX = width / 2;
-      if (config.referenceAlignment === 'left') refX = paddingX;
-      if (config.referenceAlignment === 'right') refX = width - paddingX;
-
+    if (config.showDivider) {
       ctx.save();
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
-      ctx.shadowBlur = 6 * scale;
-      ctx.fillText(refString, refX, currentY);
+      ctx.strokeStyle = config.dividerColor || 'rgba(255,255,255,0.4)';
+      ctx.lineWidth = Math.max(2, 2 * scale);
+      const divX = paddingX + colWidth + columnGap / 2;
+      ctx.beginPath();
+      ctx.moveTo(divX, currentY - (20 * scale));
+      ctx.lineTo(divX, Math.max(teEndY, enEndY) - (16 * scale));
+      ctx.stroke();
       ctx.restore();
     }
+
+    currentY = Math.max(teEndY, enEndY);
+  } else {
+    // Stacked: order depends on layoutMode (Telugu-first vs English-first)
+    const firstLines = isEnglishFirst ? englishLines : teluguLines;
+    const secondLines = isEnglishFirst ? teluguLines : englishLines;
+    const firstShow = isEnglishFirst ? showEn : showTe;
+    const secondShow = isEnglishFirst ? showTe : showEn;
+
+    if (firstShow && firstLines.length > 0) {
+      currentY = drawLines(firstLines, currentY, paddingX, maxContentWidth);
+    }
+
+    if (config.showDivider && showTe && showEn) {
+      currentY += 8 * scale;
+      ctx.save();
+      ctx.strokeStyle = config.dividerColor || 'rgba(255,255,255,0.4)';
+      ctx.lineWidth = Math.max(2, 2 * scale);
+      const divWidth = Math.min(100 * scale, width * 0.25);
+      const divStartX = (width - divWidth) / 2;
+      ctx.beginPath();
+      ctx.moveTo(divStartX, currentY);
+      ctx.lineTo(divStartX + divWidth, currentY);
+      ctx.stroke();
+      ctx.restore();
+      currentY += 28 * scale;
+    }
+
+    if (secondShow && secondLines.length > 0) {
+      currentY = drawLines(secondLines, currentY, paddingX, maxContentWidth);
+    }
+  }
+
+  // 4. Draw Reference Badge (bottom placement only — top was drawn earlier)
+  if (showRef && !isRefOnTop) {
+    currentY += refGap;
+    drawReferenceBlock(currentY);
   }
 
   // 5. Draw Watermark if enabled
@@ -370,6 +539,61 @@ export async function renderWallpaperToCanvas(
 }
 
 /**
+ * Opens the native/browser share sheet for the rendered wallpaper,
+ * separate from downloadWallpaper's save-to-device flow.
+ */
+export async function shareWallpaper(
+  config: WallpaperConfig,
+  format: 'jpeg' | 'png' = 'jpeg',
+  quality: 'standard' | 'ultra' = 'standard'
+): Promise<void> {
+  const canvas = await renderWallpaperToCanvas(config, quality);
+  const mimeType = format === 'png' ? 'image/png' : 'image/jpeg';
+  const dataUrl = canvas.toDataURL(mimeType, format === 'png' ? 1.0 : 0.95);
+  const filename = `ScripturePaper_${config.referenceEn.replace(/[^a-zA-Z0-9]/g, '_')}_${quality === 'ultra' ? 'Ultra' : 'HD'}.${format === 'png' ? 'png' : 'jpg'}`;
+
+  if (Capacitor.isNativePlatform()) {
+    const base64Data = dataUrl.split(',')[1];
+    const writeResult = await Filesystem.writeFile({
+      path: filename,
+      data: base64Data,
+      directory: Directory.Cache,
+    });
+
+    await Share.share({
+      title: 'Scripture Wallpaper',
+      text: config.referenceEn,
+      url: writeResult.uri,
+      dialogTitle: 'Share your wallpaper',
+    });
+    return;
+  }
+
+  // Web: the Web Share API needs an actual File/Blob to share an image
+  // (sharing a data: URL directly isn't supported), so convert first.
+  const blob = await (await fetch(dataUrl)).blob();
+  const file = new File([blob], filename, { type: mimeType });
+
+  if (navigator.share && navigator.canShare?.({ files: [file] })) {
+    await navigator.share({
+      title: 'Scripture Wallpaper',
+      text: config.referenceEn,
+      files: [file],
+    });
+    return;
+  }
+
+  // Fallback for browsers without Web Share API file support: fall back
+  // to a normal download so the action still does something useful.
+  const link = document.createElement('a');
+  link.download = filename;
+  link.href = dataUrl;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+/**
  * Triggers a direct browser file download for the canvas
  */
 export async function downloadWallpaper(
@@ -380,9 +604,30 @@ export async function downloadWallpaper(
   const canvas = await renderWallpaperToCanvas(config, quality);
   const mimeType = format === 'png' ? 'image/png' : 'image/jpeg';
   const dataUrl = canvas.toDataURL(mimeType, format === 'png' ? 1.0 : 0.95);
+  const filename = `ScripturePaper_${config.referenceEn.replace(/[^a-zA-Z0-9]/g, '_')}_${quality === 'ultra' ? 'Ultra' : 'HD'}.${format === 'png' ? 'png' : 'jpg'}`;
+
+  if (Capacitor.isNativePlatform()) {
+    // Browser-style <a download> clicks don't trigger file downloads inside
+    // Android/iOS WebViews, so on native platforms we write the image to
+    // disk with the Filesystem plugin and hand it off to the native share
+    // sheet, which lets the user save it straight to Photos/Gallery.
+    const base64Data = dataUrl.split(',')[1];
+    const writeResult = await Filesystem.writeFile({
+      path: filename,
+      data: base64Data,
+      directory: Directory.Cache,
+    });
+
+    await Share.share({
+      title: 'Scripture Wallpaper',
+      url: writeResult.uri,
+      dialogTitle: 'Save or share your wallpaper',
+    });
+
+    return dataUrl;
+  }
 
   const link = document.createElement('a');
-  const filename = `ScripturePaper_${config.referenceEn.replace(/[^a-zA-Z0-9]/g, '_')}_${quality === 'ultra' ? 'Ultra' : 'HD'}.${format === 'png' ? 'png' : 'jpg'}`;
   link.download = filename;
   link.href = dataUrl;
   document.body.appendChild(link);

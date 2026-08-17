@@ -153,33 +153,132 @@ export const BackgroundEditor: React.FC<BackgroundEditorProps> = ({
         )}
 
         {activeSubTab === 'gradients' && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-48 overflow-y-auto pr-1">
-            {GRADIENT_PRESETS.map((grad) => {
-              const isSelected = background.type === 'gradient' && background.gradientColors.join(',') === grad.colors.join(',');
-              return (
-                <button
-                  key={grad.id}
-                  onClick={() => onUpdateBg({
-                    type: 'gradient',
-                    gradientColors: grad.colors,
-                    gradientDirection: grad.dir
-                  })}
-                  className={`h-16 rounded-xl p-2 flex flex-col justify-end text-left border-2 transition cursor-pointer relative overflow-hidden ${
-                    isSelected ? 'border-amber-400 shadow-md shadow-amber-500/30' : 'border-zinc-800 hover:border-zinc-600'
-                  }`}
-                  style={{
-                    background: `linear-gradient(${grad.dir}, ${grad.colors.join(', ')})`
-                  }}
-                >
-                  <span className="text-[11px] font-bold text-white drop-shadow truncate">{grad.name}</span>
-                  {isSelected && (
-                    <div className="absolute top-1.5 right-1.5 w-4 h-4 bg-amber-400 text-black rounded-full flex items-center justify-center text-[10px] font-bold">
-                      <Check className="w-2.5 h-2.5 stroke-[3]" />
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-48 overflow-y-auto pr-1">
+              {GRADIENT_PRESETS.map((grad) => {
+                const isSelected = background.type === 'gradient' && background.gradientColors.join(',') === grad.colors.join(',');
+                return (
+                  <button
+                    key={grad.id}
+                    onClick={() => onUpdateBg({
+                      type: 'gradient',
+                      gradientColors: grad.colors,
+                      gradientDirection: grad.dir,
+                      gradientType: 'linear',
+                    })}
+                    className={`h-16 rounded-xl p-2 flex flex-col justify-end text-left border-2 transition cursor-pointer relative overflow-hidden ${
+                      isSelected ? 'border-amber-400 shadow-md shadow-amber-500/30' : 'border-zinc-800 hover:border-zinc-600'
+                    }`}
+                    style={{
+                      background: `linear-gradient(${grad.dir}, ${grad.colors.join(', ')})`
+                    }}
+                  >
+                    <span className="text-[11px] font-bold text-white drop-shadow truncate">{grad.name}</span>
+                    {isSelected && (
+                      <div className="absolute top-1.5 right-1.5 w-4 h-4 bg-amber-400 text-black rounded-full flex items-center justify-center text-[10px] font-bold">
+                        <Check className="w-2.5 h-2.5 stroke-[3]" />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Custom Gradient Builder */}
+            <div className="p-3 bg-black/60 rounded-xl border border-zinc-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-zinc-300">Custom Gradient</label>
+                <div className="flex p-0.5 bg-zinc-900 rounded-lg border border-zinc-800 text-[11px]">
+                  <button
+                    onClick={() => onUpdateBg({ type: 'gradient', gradientType: 'linear' })}
+                    className={`px-2.5 py-1 rounded-md font-medium transition cursor-pointer ${
+                      background.type === 'gradient' && background.gradientType !== 'radial'
+                        ? 'bg-amber-500 text-black font-bold' : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    Linear
+                  </button>
+                  <button
+                    onClick={() => onUpdateBg({ type: 'gradient', gradientType: 'radial' })}
+                    className={`px-2.5 py-1 rounded-md font-medium transition cursor-pointer ${
+                      background.type === 'gradient' && background.gradientType === 'radial'
+                        ? 'bg-amber-500 text-black font-bold' : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    Radial
+                  </button>
+                </div>
+              </div>
+
+              {/* Color Stops */}
+              <div className="grid grid-cols-3 gap-2">
+                {[0, 1, 2].map((i) => (
+                  <div key={i}>
+                    <span className="text-[10px] text-zinc-400 block mb-1">
+                      Color {i + 1}{i === 2 ? ' (opt.)' : ''}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="color"
+                        value={background.gradientColors[i] || '#000000'}
+                        onChange={(e) => {
+                          const next = [...background.gradientColors];
+                          next[i] = e.target.value;
+                          onUpdateBg({ type: 'gradient', gradientColors: next });
+                        }}
+                        className="h-8 w-full rounded-lg border border-zinc-700 bg-transparent cursor-pointer"
+                      />
+                      {i === 2 && background.gradientColors[2] && (
+                        <button
+                          onClick={() => {
+                            const next = background.gradientColors.slice(0, 2);
+                            onUpdateBg({ type: 'gradient', gradientColors: next });
+                          }}
+                          className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white cursor-pointer"
+                          title="Remove third color stop"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
-                  )}
-                </button>
-              );
-            })}
+                  </div>
+                ))}
+              </div>
+
+              {/* Angle (linear only) */}
+              {background.gradientType !== 'radial' && (
+                <div>
+                  <div className="flex justify-between text-xs text-zinc-300 mb-1">
+                    <span>Angle</span>
+                    <span className="font-mono font-bold text-amber-400">
+                      {/^-?\d+deg$/.test(background.gradientDirection) ? background.gradientDirection : '180deg'}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="360"
+                    step="5"
+                    value={/^-?\d+deg$/.test(background.gradientDirection) ? parseInt(background.gradientDirection) : 180}
+                    onChange={(e) => onUpdateBg({
+                      type: 'gradient',
+                      gradientDirection: `${e.target.value}deg`,
+                    })}
+                    className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
+                  />
+                </div>
+              )}
+
+              {/* Live Preview Swatch */}
+              <div
+                className="h-10 rounded-lg border border-zinc-800"
+                style={{
+                  background: background.gradientType === 'radial'
+                    ? `radial-gradient(circle, ${background.gradientColors.filter(Boolean).join(', ')})`
+                    : `linear-gradient(${/^-?\d+deg$/.test(background.gradientDirection) ? background.gradientDirection : '180deg'}, ${background.gradientColors.filter(Boolean).join(', ')})`,
+                }}
+              />
+            </div>
           </div>
         )}
 
@@ -353,6 +452,21 @@ export const BackgroundEditor: React.FC<BackgroundEditorProps> = ({
             onChange={(e) => onUpdateBg({ vignette: Number(e.target.value) })}
             className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
           />
+        </div>
+        {/* 6. Film Grain Toggle */}
+        <div className="flex items-center justify-between pt-1">
+          <span className="flex items-center gap-1.5 text-xs text-zinc-300">
+            <Sparkles className="w-3.5 h-3.5 text-zinc-400" />
+            <span>Film Grain Texture</span>
+          </span>
+          <button
+            onClick={() => onUpdateBg({ grain: !background.grain })}
+            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+              background.grain ? 'bg-amber-500 text-black' : 'bg-zinc-800 text-zinc-400'
+            }`}
+          >
+            {background.grain ? 'ON' : 'OFF'}
+          </button>
         </div>
       </div>
 

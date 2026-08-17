@@ -9,8 +9,20 @@ import {
   ListChecks,
   XCircle,
   Layers,
-  ChevronRight
+  ChevronRight,
+  Cross,
+  Quote,
 } from 'lucide-react';
+
+// Converts a #rrggbb hex color + 0-100 opacity into an rgba() string for translucent fills.
+function hexToRgba(hex: string, opacityPct: number): string {
+  let h = (hex || '#000000').replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const r = parseInt(h.substring(0, 2), 16) || 0;
+  const g = parseInt(h.substring(2, 4), 16) || 0;
+  const b = parseInt(h.substring(4, 6), 16) || 0;
+  return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(100, opacityPct)) / 100})`;
+}
 
 interface WallpaperCanvasProps {
   config: WallpaperConfig;
@@ -47,12 +59,75 @@ export const WallpaperCanvas: React.FC<WallpaperCanvasProps> = ({
         return { width: '420px', height: '560px', ratioValue: 3 / 4 };
       case '4:5':
         return { width: '400px', height: '500px', ratioValue: 4 / 5 };
+      case 'custom': {
+        const w = config.customWidth || 1080;
+        const h = config.customHeight || 1920;
+        const ratioValue = w / h;
+        // Scale the preview to fit a reasonable on-screen box while preserving the custom ratio.
+        const maxBoxPx = 480;
+        const displayW = ratioValue >= 1 ? maxBoxPx : maxBoxPx * ratioValue;
+        const displayH = ratioValue >= 1 ? maxBoxPx / ratioValue : maxBoxPx;
+        return { width: `${Math.round(displayW)}px`, height: `${Math.round(displayH)}px`, ratioValue };
+      }
       default:
         return { width: '380px', height: '675px', ratioValue: 9 / 16 };
     }
   };
 
   const dims = getAspectDimensions(aspectRatio);
+
+  // Reference (citation) badge/plain-text renderer, shared by top & bottom placement
+  const renderReference = () => {
+    const ref = config.referenceStyle;
+    if (!ref.showTeluguRef && !ref.showEnglishRef) return null;
+    if (!config.referenceTe && !config.referenceEn) return null;
+
+    const isIntegrated = ref.placement === 'integrated';
+
+    const textStyle: React.CSSProperties = {
+      color: ref.color || '#FBBF24',
+      fontSize: `${ref.fontSizeSp}px`,
+      fontFamily: `"${ref.fontFamily}", sans-serif`,
+      fontWeight: ref.fontWeight,
+      letterSpacing: `${ref.letterSpacing ?? 0.05}em`,
+      fontStyle: isIntegrated ? 'italic' : 'normal',
+    };
+
+    const content = (
+      <>
+        {isIntegrated && <span className="opacity-70 mr-1">—</span>}
+        {ref.showTeluguRef && config.referenceTe && <span>{config.referenceTe}</span>}
+        {ref.showTeluguRef && ref.showEnglishRef && config.referenceTe && config.referenceEn && (
+          <span className="opacity-40">•</span>
+        )}
+        {ref.showEnglishRef && config.referenceEn && <span>{config.referenceEn}</span>}
+      </>
+    );
+
+    // Integrated mode always renders as plain woven-in text, never a badge.
+    if (ref.showBadge && !isIntegrated) {
+      return (
+        <div className={`flex ${getAlignClass(config.referenceAlignment)}`}>
+          <div
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full backdrop-blur-md shadow-md"
+            style={{
+              backgroundColor: ref.badgeBg ?? 'rgba(0, 0, 0, 0.6)',
+              border: `1px solid ${ref.badgeBorder ?? 'rgba(255, 255, 255, 0.1)'}`,
+              ...textStyle,
+            }}
+          >
+            {content}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className={`flex ${getAlignClass(config.referenceAlignment)}`}>
+        <p style={{ ...textStyle, textShadow: '0 2px 6px rgba(0,0,0,0.7)' }}>{content}</p>
+      </div>
+    );
+  };
 
   const getBackgroundStyle = (): React.CSSProperties => {
     if (background.type === 'image' && background.imageUrl) {
@@ -64,8 +139,12 @@ export const WallpaperCanvas: React.FC<WallpaperCanvasProps> = ({
         transform: background.blur > 0 ? 'scale(1.08)' : 'scale(1)', // prevent white edges when blurring
       };
     } else if (background.type === 'gradient' && background.gradientColors.length > 0) {
+      const stops = background.gradientColors.filter(Boolean).join(', ');
+      const gradientCss = background.gradientType === 'radial'
+        ? `radial-gradient(circle, ${stops})`
+        : `linear-gradient(${background.gradientDirection}, ${stops})`;
       return {
-        background: `linear-gradient(${background.gradientDirection}, ${background.gradientColors.join(', ')})`,
+        background: gradientCss,
         filter: `brightness(${background.brightness}%) contrast(${background.contrast}%)`,
       };
     } else {
@@ -75,8 +154,10 @@ export const WallpaperCanvas: React.FC<WallpaperCanvasProps> = ({
     }
   };
 
-  const showTelugu = config.primaryLanguage === 'telugu' || config.primaryLanguage === 'parallel';
-  const showEnglish = config.primaryLanguage === 'english' || config.primaryLanguage === 'parallel';
+  const showTelugu = config.layoutMode !== 'english-only';
+  const showEnglish = config.layoutMode !== 'telugu-only';
+  const isSideBySide = config.layoutMode === 'side-by-side';
+  const isEnglishFirst = config.layoutMode === 'stacked-en-te';
 
   const getAlignClass = (align: 'left' | 'center' | 'right') => {
     switch (align) {
@@ -202,156 +283,262 @@ export const WallpaperCanvas: React.FC<WallpaperCanvasProps> = ({
           />
         )}
 
+        {/* Layer 3b: Film Grain Texture */}
+        {background.grain && (
+          <div
+            className="absolute inset-0 w-full h-full pointer-events-none mix-blend-overlay opacity-40"
+            style={{
+              backgroundImage:
+                "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")",
+              backgroundRepeat: 'repeat',
+            }}
+          />
+        )}
+
         {/* Layer 4: Typography & Word Interactive Flow */}
         <div
           className={`relative z-10 w-full h-full flex flex-col p-6 sm:p-8 overflow-y-auto no-scrollbar ${getVerticalAlignClass(config.verticalAlignment)}`}
+          style={{
+            padding: config.padding,
+            transform: `translate(${config.horizontalOffset ?? 0}%, ${config.verticalOffset ?? 0}%)`,
+          }}
         >
-          {/* Telugu Verse Words */}
-          {showTelugu && config.teluguWords.length > 0 && (
-            <div className={`flex flex-wrap gap-x-1.5 gap-y-1.5 my-1 ${getAlignClass(config.layoutAlignment)}`}>
-              {config.teluguWords.map((word) => {
-                const isSelected = selectedWordIds.includes(word.id);
-                const highlightBg = word.highlightColor && (word.highlightOpacity ?? 0) > 0
-                  ? `${word.highlightColor}${Math.round((word.highlightOpacity ?? 0.4) * 255).toString(16).padStart(2, '0')}`
-                  : 'transparent';
-
-                return (
-                  <button
-                    key={word.id}
-                    id={`word-te-${word.id}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const isMulti = isMultiSelectMode || e.shiftKey || e.metaKey || e.ctrlKey;
-                      onSelectWord(word, 'telugu', isMulti);
-                    }}
-                    className={`relative group inline-flex items-center justify-center px-1.5 py-0.5 rounded cursor-pointer transition-all duration-150 transform hover:scale-105 active:scale-95 ${
-                      isSelected
-                        ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-black/90 shadow-lg shadow-amber-500/30 bg-amber-500/10'
-                        : 'hover:bg-white/10'
-                    }`}
-                    style={{
-                      backgroundColor: highlightBg !== 'transparent' ? highlightBg : undefined,
-                    }}
-                  >
-                    <span
-                      style={{
-                        color: word.color,
-                        fontSize: `${word.fontSizeSp}px`,
-                        fontFamily: `"${word.fontFamily}", sans-serif`,
-                        fontWeight: word.fontWeight,
-                        fontStyle: word.isItalic ? 'italic' : 'normal',
-                        textTransform: word.isAllCaps ? 'uppercase' : 'none',
-                        textShadow: '0 2px 8px rgba(0,0,0,0.7)',
-                        lineHeight: 1.4,
-                      }}
-                    >
-                      {word.text}
-                    </span>
-
-                    {/* Word active marker */}
-                    {isSelected && (
-                      <span className="absolute -top-2 -right-2 w-4 h-4 bg-amber-400 text-black rounded-full flex items-center justify-center text-[9px] font-black shadow-md animate-in zoom-in-50">
-                        <Check className="w-2.5 h-2.5 stroke-[3]" />
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
+          {/* Content width constraint, centered within the padded stage */}
+          <div
+            className="w-full mx-auto flex flex-col transition-all"
+            style={{
+              maxWidth: `${config.containerMaxWidth ?? 100}%`,
+              backgroundColor: config.cardBackdrop?.enabled
+                ? hexToRgba(config.cardBackdrop.color, config.cardBackdrop.opacity)
+                : 'transparent',
+              backdropFilter: config.cardBackdrop?.enabled ? `blur(${config.cardBackdrop.blur}px)` : 'none',
+              WebkitBackdropFilter: config.cardBackdrop?.enabled ? `blur(${config.cardBackdrop.blur}px)` : 'none',
+              border: config.cardBackdrop?.enabled && config.cardBackdrop.border
+                ? `1px solid ${hexToRgba(config.cardBackdrop.borderColor, 30)}`
+                : 'none',
+              borderRadius: config.cardBackdrop?.enabled ? `${config.cardBackdrop.borderRadius}px` : '0px',
+              padding: config.cardBackdrop?.enabled ? '28px' : '0px',
+              boxShadow: config.cardBackdrop?.enabled && config.cardBackdrop.shadow
+                ? '0 20px 40px rgba(0,0,0,0.5)'
+                : 'none',
+            }}
+          >
+          {/* Optional Decorative Cross Icon */}
+          {config.showCross && (
+            <div className={`mb-4 flex ${getAlignClass(config.layoutAlignment)}`}>
+              <div
+                className="rounded-full p-2.5"
+                style={{
+                  backgroundColor: 'rgba(255,255,255,0.06)',
+                  boxShadow: `0 0 20px ${config.crossColor}40`,
+                }}
+              >
+                <Cross
+                  className="stroke-[1.5]"
+                  style={{
+                    height: `${config.crossSize}px`,
+                    width: `${config.crossSize}px`,
+                    color: config.crossColor,
+                  }}
+                />
+              </div>
             </div>
           )}
 
-          {/* Divider between Parallel Verses */}
-          {config.showDivider && showTelugu && showEnglish && (
-            <div className={`my-4 flex ${getAlignClass(config.layoutAlignment)}`}>
-              <div
-                className="h-0.5 rounded-full transition-all"
-                style={{
-                  width: `${config.dividerWidth || 60}px`,
-                  backgroundColor: config.dividerColor || 'rgba(255,255,255,0.4)',
-                }}
+          {/* Reference (Top Placement) */}
+          {config.referenceStyle.placement === 'top' && (
+            <div className="mb-4">{renderReference()}</div>
+          )}
+
+          {/* Decorative Opening Quote Mark */}
+          {config.quoteMarks && (
+            <div className={`flex ${getAlignClass(config.layoutAlignment)} -mb-2`}>
+              <Quote
+                className="fill-current opacity-30"
+                style={{ width: 28, height: 28, color: config.dividerColor || '#FBBF24', transform: 'scaleX(-1)' }}
               />
             </div>
           )}
 
-          {/* English Verse Words */}
-          {showEnglish && config.englishWords.length > 0 && (
-            <div className={`flex flex-wrap gap-x-1.5 gap-y-1.5 my-1 ${getAlignClass(config.layoutAlignment)}`}>
-              {config.englishWords.map((word) => {
-                const isSelected = selectedWordIds.includes(word.id);
-                const highlightBg = word.highlightColor && (word.highlightOpacity ?? 0) > 0
-                  ? `${word.highlightColor}${Math.round((word.highlightOpacity ?? 0.4) * 255).toString(16).padStart(2, '0')}`
-                  : 'transparent';
+          {(() => {
+            const renderWordBlock = (words: WordStyle[], language: 'telugu' | 'english') => (
+              <div
+                className={`flex flex-wrap gap-x-1.5 gap-y-1.5 ${getAlignClass(config.layoutAlignment)}`}
+                style={{ marginTop: (config.sectionGap ?? 16) / 2, marginBottom: (config.sectionGap ?? 16) / 2 }}
+              >
+                {words.map((word) => {
+                  const isSelected = selectedWordIds.includes(word.id);
+                  const highlightBg = word.highlightColor && (word.highlightOpacity ?? 0) > 0
+                    ? `${word.highlightColor}${Math.round((word.highlightOpacity ?? 0.4) * 255).toString(16).padStart(2, '0')}`
+                    : 'transparent';
+                  const padX = word.highlightPaddingX ?? 6;
+                  const padY = word.highlightPaddingY ?? 2;
+                  const radius = word.highlightRadius ?? 4;
+                  const shadowColor = word.shadowColor ?? 'rgba(0,0,0,0.7)';
+                  const shadowBlur = word.shadowBlur ?? 8;
+                  const shadowOffsetX = word.shadowOffsetX ?? 0;
+                  const shadowOffsetY = word.shadowOffsetY ?? 2;
+                  // Fall back to the legacy isAllCaps flag for configs created before textTransform existed.
+                  const textTransform = word.textTransform ?? (word.isAllCaps ? 'uppercase' : 'none');
 
-                return (
-                  <button
-                    key={word.id}
-                    id={`word-en-${word.id}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const isMulti = isMultiSelectMode || e.shiftKey || e.metaKey || e.ctrlKey;
-                      onSelectWord(word, 'english', isMulti);
-                    }}
-                    className={`relative group inline-flex items-center justify-center px-1.5 py-0.5 rounded cursor-pointer transition-all duration-150 transform hover:scale-105 active:scale-95 ${
-                      isSelected
-                        ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-black/90 shadow-lg shadow-amber-500/30 bg-amber-500/10'
-                        : 'hover:bg-white/10'
-                    }`}
-                    style={{
-                      backgroundColor: highlightBg !== 'transparent' ? highlightBg : undefined,
-                    }}
-                  >
-                    <span
+                  return (
+                    <button
+                      key={word.id}
+                      id={`word-${language === 'telugu' ? 'te' : 'en'}-${word.id}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const isMulti = isMultiSelectMode || e.shiftKey || e.metaKey || e.ctrlKey;
+                        onSelectWord(word, language, isMulti);
+                      }}
+                      className={`relative group inline-flex items-center justify-center cursor-pointer transition-all duration-150 transform hover:scale-105 active:scale-95 ${
+                        isSelected
+                          ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-black/90 shadow-lg shadow-amber-500/30 bg-amber-500/10'
+                          : 'hover:bg-white/10'
+                      }`}
                       style={{
-                        color: word.color,
-                        fontSize: `${word.fontSizeSp}px`,
-                        fontFamily: `"${word.fontFamily}", sans-serif`,
-                        fontWeight: word.fontWeight,
-                        fontStyle: word.isItalic ? 'italic' : 'normal',
-                        textTransform: word.isAllCaps ? 'uppercase' : 'none',
-                        textShadow: '0 2px 8px rgba(0,0,0,0.7)',
-                        lineHeight: 1.4,
+                        backgroundColor: highlightBg !== 'transparent' ? highlightBg : undefined,
+                        paddingLeft: highlightBg !== 'transparent' ? padX : 6,
+                        paddingRight: highlightBg !== 'transparent' ? padX : 6,
+                        paddingTop: highlightBg !== 'transparent' ? padY : 2,
+                        paddingBottom: highlightBg !== 'transparent' ? padY : 2,
+                        borderRadius: highlightBg !== 'transparent' ? radius : 4,
                       }}
                     >
-                      {word.text}
-                    </span>
-
-                    {/* Word active marker */}
-                    {isSelected && (
-                      <span className="absolute -top-2 -right-2 w-4 h-4 bg-amber-400 text-black rounded-full flex items-center justify-center text-[9px] font-black shadow-md animate-in zoom-in-50">
-                        <Check className="w-2.5 h-2.5 stroke-[3]" />
+                      <span
+                        style={{
+                          color: word.color,
+                          fontSize: `${word.fontSizeSp}px`,
+                          fontFamily: `"${word.fontFamily}", sans-serif`,
+                          fontWeight: word.fontWeight,
+                          fontStyle: word.isItalic ? 'italic' : 'normal',
+                          textTransform,
+                          textDecoration: word.textDecoration === 'underline' ? 'underline' : 'none',
+                          textShadow: `${shadowOffsetX}px ${shadowOffsetY}px ${shadowBlur}px ${shadowColor}`,
+                          lineHeight: word.lineHeight ?? 1.4,
+                        }}
+                      >
+                        {word.text}
                       </span>
-                    )}
-                  </button>
+
+                      {/* Word active marker */}
+                      {isSelected && (
+                        <span className="absolute -top-2 -right-2 w-4 h-4 bg-amber-400 text-black rounded-full flex items-center justify-center text-[9px] font-black shadow-md animate-in zoom-in-50">
+                          <Check className="w-2.5 h-2.5 stroke-[3]" />
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+
+            const divider = config.showDivider && showTelugu && showEnglish && (() => {
+              const style = config.dividerStyle ?? 'minimal';
+              const color = config.dividerColor || 'rgba(255,255,255,0.4)';
+              const alignClass = getAlignClass(config.layoutAlignment);
+              const gapStyle = { marginTop: config.sectionGap ?? 16, marginBottom: config.sectionGap ?? 16 };
+
+              if (style === 'none') return null;
+
+              if (style === 'cross') {
+                return (
+                  <div className={`flex items-center gap-3 opacity-90 ${alignClass}`} style={gapStyle}>
+                    <div className="h-px w-14" style={{ background: `linear-gradient(to right, transparent, ${color})` }} />
+                    <Cross className="w-4 h-4" style={{ color }} />
+                    <div className="h-px w-14" style={{ background: `linear-gradient(to left, transparent, ${color})` }} />
+                  </div>
                 );
-              })}
+              }
+
+              if (style === 'dots') {
+                return (
+                  <div className={`flex items-center gap-2 opacity-85 ${alignClass}`} style={gapStyle}>
+                    <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
+                    <div className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+                    <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
+                  </div>
+                );
+              }
+
+              if (style === 'gold-line') {
+                return (
+                  <div className={`flex ${alignClass}`} style={gapStyle}>
+                    <div
+                      className="h-[2px] rounded-full"
+                      style={{
+                        width: `${config.dividerWidth || 60}px`,
+                        background: `linear-gradient(90deg, transparent, ${color}, transparent)`,
+                      }}
+                    />
+                  </div>
+                );
+              }
+
+              if (style === 'ornament') {
+                return (
+                  <div className={`flex items-center gap-2 opacity-90 ${alignClass}`} style={gapStyle}>
+                    <div className="h-px w-10" style={{ background: `linear-gradient(to right, transparent, ${color})` }} />
+                    <span style={{ color, fontSize: '13px', lineHeight: 1 }}>❧</span>
+                    <div className="h-px w-10" style={{ background: `linear-gradient(to left, transparent, ${color})` }} />
+                  </div>
+                );
+              }
+
+              // minimal (default)
+              return (
+                <div className={`flex ${alignClass}`} style={gapStyle}>
+                  <div
+                    className="h-0.5 rounded-full"
+                    style={{ width: `${config.dividerWidth || 60}px`, backgroundColor: color }}
+                  />
+                </div>
+              );
+            })();
+
+            const teluguBlock = showTelugu && config.teluguWords.length > 0 && renderWordBlock(config.teluguWords, 'telugu');
+            const englishBlock = showEnglish && config.englishWords.length > 0 && renderWordBlock(config.englishWords, 'english');
+
+            // Side-by-side: two columns, Telugu left / English right, own scroll each
+            if (isSideBySide && showTelugu && showEnglish) {
+              return (
+                <div className="flex flex-row w-full items-start justify-center" style={{ gap: config.sectionGap ?? 16 }}>
+                  <div className="flex-1 min-w-0">{teluguBlock}</div>
+                  <div className="w-px self-stretch bg-white/15 rounded-full" />
+                  <div className="flex-1 min-w-0">{englishBlock}</div>
+                </div>
+              );
+            }
+
+            // Stacked: order depends on layoutMode (Telugu-first vs English-first)
+            const first = isEnglishFirst ? englishBlock : teluguBlock;
+            const second = isEnglishFirst ? teluguBlock : englishBlock;
+
+            return (
+              <>
+                {first}
+                {divider}
+                {second}
+              </>
+            );
+          })()}
+
+          {/* Decorative Closing Quote Mark */}
+          {config.quoteMarks && (
+            <div className={`flex ${getAlignClass(config.layoutAlignment)} -mt-2`}>
+              <Quote
+                className="fill-current opacity-30"
+                style={{ width: 28, height: 28, color: config.dividerColor || '#FBBF24' }}
+              />
             </div>
           )}
 
-          {/* Reference Badge */}
-          {(config.referenceStyle.showTeluguRef || config.referenceStyle.showEnglishRef) && (
-            <div className={`mt-5 flex ${getAlignClass(config.referenceAlignment)}`}>
-              <div
-                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/60 backdrop-blur-md border border-white/10 shadow-md"
-                style={{
-                  color: config.referenceStyle.color || '#FBBF24',
-                  fontSize: `${config.referenceStyle.fontSizeSp}px`,
-                  fontFamily: `"${config.referenceStyle.fontFamily}", sans-serif`,
-                  fontWeight: config.referenceStyle.fontWeight,
-                  letterSpacing: '0.05em',
-                }}
-              >
-                {config.referenceStyle.showTeluguRef && config.referenceTe && (
-                  <span>{config.referenceTe}</span>
-                )}
-                {config.referenceStyle.showTeluguRef && config.referenceStyle.showEnglishRef && config.referenceTe && config.referenceEn && (
-                  <span className="opacity-40">•</span>
-                )}
-                {config.referenceStyle.showEnglishRef && config.referenceEn && (
-                  <span>{config.referenceEn}</span>
-                )}
-              </div>
+          {/* Reference (Bottom / Integrated Placement) */}
+          {config.referenceStyle.placement !== 'top' && (
+            <div className={config.referenceStyle.placement === 'integrated' ? 'mt-1.5' : 'mt-5'}>
+              {renderReference()}
             </div>
           )}
+          </div>
 
           {/* Optional Watermark */}
           {config.showWatermark && config.watermarkText && (

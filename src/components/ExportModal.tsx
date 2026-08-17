@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { WallpaperConfig } from '../types';
-import { downloadWallpaper, renderWallpaperToCanvas, getResolutionForAspect } from '../utils/canvasRenderer';
+import { downloadWallpaper, shareWallpaper, renderWallpaperToCanvas, getResolutionForAspect } from '../utils/canvasRenderer';
 import confetti from 'canvas-confetti';
 import {
   Download,
@@ -12,6 +12,7 @@ import {
   Layers,
   Copy,
   ExternalLink,
+  Share2,
   X
 } from 'lucide-react';
 
@@ -24,6 +25,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ config, onClose }) => 
   const [quality, setQuality] = useState<'standard' | 'ultra'>('standard');
   const [format, setFormat] = useState<'jpeg' | 'png'>('jpeg');
   const [isExporting, setIsExporting] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -46,6 +48,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({ config, onClose }) => 
       console.error('Export error:', err);
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleShare = async () => {
+    setIsSharing(true);
+    try {
+      await shareWallpaper(config, format, quality);
+    } catch (err) {
+      console.error('Share error:', err);
+    } finally {
+      setIsSharing(false);
     }
   };
 
@@ -190,6 +203,24 @@ export const ExportModal: React.FC<ExportModalProps> = ({ config, onClose }) => 
               <>
                 <Download className="w-4 h-4" />
                 <span>Download High-Res Wallpaper</span>
+              </>
+            )}
+          </button>
+
+          <button
+            onClick={handleShare}
+            disabled={isSharing}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-sm border border-zinc-700 transition cursor-pointer disabled:opacity-50"
+          >
+            {isSharing ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Preparing...</span>
+              </>
+            ) : (
+              <>
+                <Share2 className="w-4 h-4" />
+                <span>Share Wallpaper</span>
               </>
             )}
           </button>

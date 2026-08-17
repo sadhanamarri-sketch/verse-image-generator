@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
-import { WallpaperConfig, WordStyle, ParallelVerse, AspectRatioType } from './types';
+import { WallpaperConfig, WordStyle, ParallelVerse, AspectRatioType, LayoutMode } from './types';
 import { POPULAR_VERSES } from './data/verses';
 import { PRESET_BACKGROUNDS } from './data/backgrounds';
 import { tokenizeStringToWords } from './utils/textTokenizer';
 
 import { Header } from './components/Header';
 import { WallpaperCanvas } from './components/WallpaperCanvas';
+import { FloatingWordToolbar } from './components/FloatingWordToolbar';
 import { WordStyleEditor } from './components/WordStyleEditor';
 import { BackgroundEditor } from './components/BackgroundEditor';
+import { ReferenceEditor } from './components/ReferenceEditor';
+import { LayoutEditor } from './components/LayoutEditor';
 import { VerseSelector } from './components/VerseSelector';
 import { ExportModal } from './components/ExportModal';
 
@@ -25,7 +28,9 @@ import {
   Check,
   Plus,
   CheckSquare,
-  ListChecks
+  ListChecks,
+  Quote,
+  Layout
 } from 'lucide-react';
 
 const INITIAL_VERSE = POPULAR_VERSES[0]; // John 3:16
@@ -33,11 +38,17 @@ const INITIAL_VERSE = POPULAR_VERSES[0]; // John 3:16
 const createInitialConfig = (): WallpaperConfig => {
   return {
     aspectRatio: '9:16',
-    primaryLanguage: 'parallel',
+    customWidth: 1080,
+    customHeight: 1920,
+    layoutMode: 'stacked-te-en',
     layoutAlignment: 'center',
     verticalAlignment: 'center',
     referenceAlignment: 'center',
     padding: 24,
+    containerMaxWidth: 100,
+    sectionGap: 16,
+    verticalOffset: 0,
+    horizontalOffset: 0,
     teluguWords: tokenizeStringToWords(INITIAL_VERSE.teluguBsi, 'telugu', {
       fontSizeSp: 23,
       fontFamily: 'Noto Serif Telugu',
@@ -59,12 +70,18 @@ const createInitialConfig = (): WallpaperConfig => {
       fontWeight: '700',
       showTeluguRef: true,
       showEnglishRef: true,
+      placement: 'bottom',
+      showBadge: true,
+      badgeBg: 'rgba(0, 0, 0, 0.6)',
+      badgeBorder: 'rgba(255, 255, 255, 0.1)',
+      letterSpacing: 0.05,
     },
     background: {
       type: 'image',
       imageUrl: PRESET_BACKGROUNDS[0].fullUrl,
       gradientColors: ['#000000', '#121212', '#1E1E24'],
       gradientDirection: 'to bottom',
+      gradientType: 'linear',
       solidColor: '#0A0A0A',
       scrimColor: '#000000',
       scrimOpacity: 0.35,
@@ -73,10 +90,26 @@ const createInitialConfig = (): WallpaperConfig => {
       contrast: 100,
       saturation: 100,
       vignette: 0.35,
+      grain: false,
+    },
+    cardBackdrop: {
+      enabled: false,
+      color: '#0F172A',
+      opacity: 50,
+      blur: 16,
+      border: true,
+      borderColor: '#FFFFFF',
+      borderRadius: 20,
+      shadow: true,
     },
     showDivider: true,
     dividerColor: 'rgba(255, 255, 255, 0.35)',
     dividerWidth: 64,
+    dividerStyle: 'minimal',
+    showCross: false,
+    crossColor: '#FBBF24',
+    crossSize: 28,
+    quoteMarks: false,
     watermarkText: 'SCRIPTURE PAPER • TELUGU & ENGLISH',
     showWatermark: true,
   };
@@ -93,6 +126,8 @@ export default function App() {
   // Modals / Panels
   const [showVerseSelector, setShowVerseSelector] = useState(false);
   const [showBgEditor, setShowBgEditor] = useState(false);
+  const [showRefEditor, setShowRefEditor] = useState(false);
+  const [showLayoutEditor, setShowLayoutEditor] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
 
   // Active word list lookup based on selected language
@@ -103,6 +138,8 @@ export default function App() {
   // Handle word selection from canvas (supports single tap, Shift/Cmd click, or Multi-select toggle mode)
   const handleSelectWord = (word: WordStyle, language: 'telugu' | 'english', isMultiToggle: boolean = false) => {
     setShowBgEditor(false); // Focus on styling inspector
+    setShowRefEditor(false);
+    setShowLayoutEditor(false);
 
     if (language !== selectedLanguage) {
       // Switching between Telugu and English resets selection to the new language's word
@@ -129,6 +166,8 @@ export default function App() {
   const handleSelectAllLanguage = (language: 'telugu' | 'english') => {
     setSelectedLanguage(language);
     setShowBgEditor(false);
+    setShowRefEditor(false);
+    setShowLayoutEditor(false);
     const targetWords = language === 'telugu' ? config.teluguWords : config.englishWords;
     setSelectedWordIds(targetWords.map(w => w.id));
   };
@@ -165,32 +204,30 @@ export default function App() {
   // Apply primary selected word's style to all words in that language
   const handleApplyToAllWords = () => {
     if (selectedWords.length === 0) return;
-    const { color, fontSizeSp, fontFamily, fontWeight, isItalic } = selectedWords[0];
+    const {
+      color, fontSizeSp, fontFamily, fontWeight, isItalic,
+      textTransform, textDecoration, lineHeight,
+      shadowColor, shadowBlur, shadowOffsetX, shadowOffsetY,
+      highlightPaddingX, highlightPaddingY, highlightRadius,
+    } = selectedWords[0];
+
+    const bulkStyle = {
+      color, fontSizeSp, fontFamily, fontWeight, isItalic,
+      textTransform, textDecoration, lineHeight,
+      shadowColor, shadowBlur, shadowOffsetX, shadowOffsetY,
+      highlightPaddingX, highlightPaddingY, highlightRadius,
+    };
 
     setConfig(prev => {
       if (selectedLanguage === 'telugu') {
         return {
           ...prev,
-          teluguWords: prev.teluguWords.map(w => ({
-            ...w,
-            color,
-            fontSizeSp,
-            fontFamily,
-            fontWeight,
-            isItalic
-          }))
+          teluguWords: prev.teluguWords.map(w => ({ ...w, ...bulkStyle }))
         };
       } else {
         return {
           ...prev,
-          englishWords: prev.englishWords.map(w => ({
-            ...w,
-            color,
-            fontSizeSp,
-            fontFamily,
-            fontWeight,
-            isItalic
-          }))
+          englishWords: prev.englishWords.map(w => ({ ...w, ...bulkStyle }))
         };
       }
     });
@@ -259,6 +296,15 @@ export default function App() {
     setSelectedWordIds([]);
   };
 
+  // Update reference (citation) styling
+  const handleUpdateRefStyle = (updates: Partial<WallpaperConfig['referenceStyle']>) => {
+    setConfig(prev => ({ ...prev, referenceStyle: { ...prev.referenceStyle, ...updates } }));
+  };
+
+  const handleUpdateRefAlignment = (alignment: 'left' | 'center' | 'right') => {
+    setConfig(prev => ({ ...prev, referenceAlignment: alignment }));
+  };
+
   return (
     <div className="min-h-screen bg-black text-zinc-100 flex flex-col font-sans selection:bg-amber-500/30 selection:text-amber-200">
       
@@ -267,6 +313,8 @@ export default function App() {
         onOpenVersePicker={() => setShowVerseSelector(true)}
         onOpenBgPicker={() => {
           setShowBgEditor(true);
+          setShowRefEditor(false);
+          setShowLayoutEditor(false);
           setSelectedWordIds([]);
         }}
         onOpenExportModal={() => setShowExportModal(true)}
@@ -327,26 +375,23 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Language Mode Toggle */}
-                <div className="flex items-center gap-1 bg-black p-1 rounded-xl border border-zinc-800">
-                  <button
-                    onClick={() => setConfig(prev => ({ ...prev, primaryLanguage: 'parallel' }))}
-                    className={`px-2 py-1 rounded-lg text-[11px] font-medium transition cursor-pointer ${config.primaryLanguage === 'parallel' ? 'bg-amber-500 text-black font-bold shadow-sm' : 'text-zinc-400 hover:text-white'}`}
-                  >
-                    Parallel Dual
-                  </button>
-                  <button
-                    onClick={() => setConfig(prev => ({ ...prev, primaryLanguage: 'telugu' }))}
-                    className={`px-2 py-1 rounded-lg text-[11px] font-medium transition cursor-pointer ${config.primaryLanguage === 'telugu' ? 'bg-amber-500 text-black font-bold shadow-sm' : 'text-zinc-400 hover:text-white'}`}
-                  >
-                    తెలుగు
-                  </button>
-                  <button
-                    onClick={() => setConfig(prev => ({ ...prev, primaryLanguage: 'english' }))}
-                    className={`px-2 py-1 rounded-lg text-[11px] font-medium transition cursor-pointer ${config.primaryLanguage === 'english' ? 'bg-amber-500 text-black font-bold shadow-sm' : 'text-zinc-400 hover:text-white'}`}
-                  >
-                    English
-                  </button>
+                {/* Layout Mode Selector */}
+                <div className="flex items-center gap-1 bg-black p-1 rounded-xl border border-zinc-800 flex-wrap">
+                  {([
+                    { id: 'stacked-te-en', label: 'తె → EN' },
+                    { id: 'stacked-en-te', label: 'EN → తె' },
+                    { id: 'side-by-side', label: 'తె | EN' },
+                    { id: 'telugu-only', label: 'తెలుగు' },
+                    { id: 'english-only', label: 'English' },
+                  ] as { id: LayoutMode; label: string }[]).map((mode) => (
+                    <button
+                      key={mode.id}
+                      onClick={() => setConfig(prev => ({ ...prev, layoutMode: mode.id }))}
+                      className={`px-2 py-1 rounded-lg text-[11px] font-medium transition cursor-pointer ${config.layoutMode === mode.id ? 'bg-amber-500 text-black font-bold shadow-sm' : 'text-zinc-400 hover:text-white'}`}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -359,6 +404,17 @@ export default function App() {
                 onSelectWord={handleSelectWord}
                 onSelectAllLanguage={handleSelectAllLanguage}
                 onClearSelection={handleClearSelection}
+              />
+
+              {/* Floating Quick-Style Toolbar for the active word selection */}
+              <FloatingWordToolbar
+                selectedWords={selectedWords}
+                language={selectedLanguage}
+                onUpdate={handleUpdateWordStyle}
+                onOpenFullEditor={() => {
+                  document.getElementById('word-style-inspector')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }}
+                onDeselect={handleClearSelection}
               />
             </div>
 
@@ -388,6 +444,8 @@ export default function App() {
                   id="btn-open-bg"
                   onClick={() => {
                     setShowBgEditor(true);
+                    setShowRefEditor(false);
+                    setShowLayoutEditor(false);
                     setSelectedWordIds([]);
                   }}
                   className="flex items-center justify-between p-3.5 rounded-2xl bg-[#121214] hover:bg-[#18181b] border border-zinc-800/80 hover:border-amber-500/50 transition shadow-lg group cursor-pointer"
@@ -403,28 +461,87 @@ export default function App() {
                   </div>
                   <span className="text-xs text-amber-400 font-bold">→</span>
                 </button>
+
+                <button
+                  id="btn-open-ref"
+                  onClick={() => {
+                    setShowRefEditor(true);
+                    setShowBgEditor(false);
+                    setShowLayoutEditor(false);
+                    setSelectedWordIds([]);
+                  }}
+                  className="col-span-2 flex items-center justify-between p-3.5 rounded-2xl bg-[#121214] hover:bg-[#18181b] border border-zinc-800/80 hover:border-amber-500/50 transition shadow-lg group cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/20 flex items-center justify-center font-bold">
+                      <Quote className="w-4 h-4" />
+                    </div>
+                    <div className="text-left">
+                      <div className="text-xs font-bold text-white group-hover:text-amber-300">Reference Styling</div>
+                      <div className="text-[10px] text-zinc-400">Placement, badge, color & size</div>
+                    </div>
+                  </div>
+                  <span className="text-xs text-amber-400 font-bold">→</span>
+                </button>
+
+                <button
+                  id="btn-open-layout"
+                  onClick={() => {
+                    setShowLayoutEditor(true);
+                    setShowBgEditor(false);
+                    setShowRefEditor(false);
+                    setSelectedWordIds([]);
+                  }}
+                  className="col-span-2 flex items-center justify-between p-3.5 rounded-2xl bg-[#121214] hover:bg-[#18181b] border border-zinc-800/80 hover:border-amber-500/50 transition shadow-lg group cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/20 flex items-center justify-center font-bold">
+                      <Layout className="w-4 h-4" />
+                    </div>
+                    <div className="text-left">
+                      <div className="text-xs font-bold text-white group-hover:text-amber-300">Layout & Spacing</div>
+                      <div className="text-[10px] text-zinc-400">Width, gap & fine position offsets</div>
+                    </div>
+                  </div>
+                  <span className="text-xs text-amber-400 font-bold">→</span>
+                </button>
               </div>
 
               {/* Conditional Active Inspector */}
               {selectedWords.length > 0 ? (
-                <WordStyleEditor
-                  selectedWords={selectedWords}
-                  language={selectedLanguage}
-                  onUpdate={handleUpdateWordStyle}
-                  onApplyToAll={handleApplyToAllWords}
-                  onClose={handleClearSelection}
-                  onRemoveWordFromSelection={handleRemoveWordFromSelection}
-                  onSelectAllWords={() => handleSelectAllLanguage(selectedLanguage)}
-                  onPrevWord={handlePrevWord}
-                  onNextWord={handleNextWord}
-                  hasPrev={activeWordIndex > 0}
-                  hasNext={activeWordIndex < activeWordList.length - 1 && activeWordIndex !== -1}
-                />
+                <div id="word-style-inspector">
+                  <WordStyleEditor
+                    selectedWords={selectedWords}
+                    language={selectedLanguage}
+                    onUpdate={handleUpdateWordStyle}
+                    onApplyToAll={handleApplyToAllWords}
+                    onClose={handleClearSelection}
+                    onRemoveWordFromSelection={handleRemoveWordFromSelection}
+                    onSelectAllWords={() => handleSelectAllLanguage(selectedLanguage)}
+                    onPrevWord={handlePrevWord}
+                    onNextWord={handleNextWord}
+                    hasPrev={activeWordIndex > 0}
+                    hasNext={activeWordIndex < activeWordList.length - 1 && activeWordIndex !== -1}
+                  />
+                </div>
               ) : showBgEditor ? (
                 <BackgroundEditor
                   config={config}
                   onUpdateBg={(updates) => setConfig(prev => ({ ...prev, background: { ...prev.background, ...updates } }))}
                   onClose={() => setShowBgEditor(false)}
+                />
+              ) : showRefEditor ? (
+                <ReferenceEditor
+                  config={config}
+                  onUpdateRef={handleUpdateRefStyle}
+                  onUpdateAlignment={handleUpdateRefAlignment}
+                  onClose={() => setShowRefEditor(false)}
+                />
+              ) : showLayoutEditor ? (
+                <LayoutEditor
+                  config={config}
+                  onChangeConfig={(updates) => setConfig(prev => ({ ...prev, ...updates }))}
+                  onClose={() => setShowLayoutEditor(false)}
                 />
               ) : (
                 /* Default Inspector Placeholder when no word is selected */
@@ -485,23 +602,6 @@ export default function App() {
                         type="checkbox"
                         checked={config.showDivider}
                         onChange={(e) => setConfig(prev => ({ ...prev, showDivider: e.target.checked }))}
-                        className="accent-amber-500 w-4 h-4 rounded cursor-pointer"
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between text-xs text-zinc-300">
-                      <span>Reference Badge</span>
-                      <input
-                        type="checkbox"
-                        checked={config.referenceStyle.showTeluguRef || config.referenceStyle.showEnglishRef}
-                        onChange={(e) => setConfig(prev => ({
-                          ...prev,
-                          referenceStyle: {
-                            ...prev.referenceStyle,
-                            showTeluguRef: e.target.checked,
-                            showEnglishRef: e.target.checked
-                          }
-                        }))}
                         className="accent-amber-500 w-4 h-4 rounded cursor-pointer"
                       />
                     </div>
