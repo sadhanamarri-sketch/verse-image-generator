@@ -9,6 +9,19 @@ export interface ExportResolution {
   label: string;
 }
 
+// Reference numerals (chapter:verse, verse ranges) always render in this plain,
+// standard-digit font rather than the reference's decorative fontFamily —
+// display fonts (especially Telugu ones) often carry stylized or script-look
+// digits that read as "off" next to a normal citation number.
+const STANDARD_NUMERAL_FONT = 'Inter';
+
+// Splits a reference string like "యోహాను 3:16" or "John 3:16-18" into
+// alternating text/numeric runs so each can be drawn with its own font.
+function splitRefSegments(text: string): { text: string; isNumeric: boolean }[] {
+  const parts = text.split(/(\d+(?:[:\-–,]\d+)*)/g);
+  return parts.filter((p) => p.length > 0).map((p) => ({ text: p, isNumeric: /^\d[\d:\-–,]*\d$|^\d$/.test(p) }));
+}
+
 /**
  * Traces a rounded-rectangle path on the given context (manual implementation
  * for broad WebView compatibility, since ctx.roundRect isn't universally supported).
@@ -407,7 +420,8 @@ export async function renderWallpaperToCanvas(
     ctx.save();
 
     const refFontSize = Math.round(refStyle.fontSizeSp * scale);
-    ctx.font = `${isRefIntegrated ? 'italic ' : ''}${refStyle.fontWeight} ${refFontSize}px "${refStyle.fontFamily}", sans-serif`;
+    const textFont = `${isRefIntegrated ? 'italic ' : ''}${refStyle.fontWeight} ${refFontSize}px "${refStyle.fontFamily}", sans-serif`;
+    const numFont = `${isRefIntegrated ? 'italic ' : ''}${refStyle.fontWeight} ${refFontSize}px "${STANDARD_NUMERAL_FONT}", sans-serif`;
 
     // Approximate letter-spacing (supported on modern Chromium-based WebViews)
     const letterSpacingPx = (refStyle.letterSpacing ?? 0.05) * refFontSize;
@@ -415,12 +429,19 @@ export async function renderWallpaperToCanvas(
       (ctx as any).letterSpacing = `${letterSpacingPx}px`;
     }
 
-    const textWidth = ctx.measureText(refString).width;
-    ctx.textAlign = config.referenceAlignment;
+    // Numbers (chapter:verse) are drawn in a plain standard-digit font, kept
+    // separate from the surrounding text which uses the chosen reference font.
+    const segments = splitRefSegments(refString);
+    const segmentWidth = (s: { text: string; isNumeric: boolean }) => {
+      ctx.font = s.isNumeric ? numFont : textFont;
+      return ctx.measureText(s.text).width;
+    };
+    const textWidth = segments.reduce((sum, s) => sum + segmentWidth(s), 0);
+    ctx.textAlign = 'left';
 
-    let refX = width / 2;
+    let refX = width / 2 - textWidth / 2;
     if (config.referenceAlignment === 'left') refX = contentOffsetX;
-    if (config.referenceAlignment === 'right') refX = contentOffsetX + maxContentWidth;
+    if (config.referenceAlignment === 'right') refX = contentOffsetX + maxContentWidth - textWidth;
 
     if (refStyle.showBadge && !isRefIntegrated) {
       const padX = 14 * scale;
@@ -443,12 +464,23 @@ export async function renderWallpaperToCanvas(
       ctx.fill();
       ctx.stroke();
       ctx.restore();
+
+      // Badge alignment centers the badge itself; re-center the text run within it.
+      if (config.referenceAlignment === 'center') refX = badgeLeft + padX;
+      else if (config.referenceAlignment === 'left') refX = badgeLeft + padX;
+      else refX = badgeLeft + badgeWidth - padX - textWidth;
     }
 
     ctx.fillStyle = refStyle.color || '#FBBF24';
     ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
     ctx.shadowBlur = 6 * scale;
-    ctx.fillText(refString, refX, y);
+
+    let curX = refX;
+    for (const s of segments) {
+      ctx.font = s.isNumeric ? numFont : textFont;
+      ctx.fillText(s.text, curX, y);
+      curX += ctx.measureText(s.text).width;
+    }
 
     ctx.restore();
   };
@@ -572,8 +604,8 @@ export async function renderWallpaperToCanvas(
       ctx.save();
       ctx.strokeStyle = config.dividerColor || 'rgba(255,255,255,0.4)';
       ctx.lineWidth = Math.max(2, 2 * scale);
-      const divWidth = Math.min(100 * scale, width * 0.25);
-      const divStartX = (width - divWidth) / 2;
+      const divWidth = Math.min(100 * scale, maxContentWidth * 0.5);
+      const divStartX = contentOffsetX + (maxContentWidth - divWidth) / 2;
       ctx.beginPath();
       ctx.moveTo(divStartX, currentY);
       ctx.lineTo(divStartX + divWidth, currentY);

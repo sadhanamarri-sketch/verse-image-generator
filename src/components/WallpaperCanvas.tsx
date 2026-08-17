@@ -75,12 +75,23 @@ export const WallpaperCanvas: React.FC<WallpaperCanvasProps> = ({
   };
 
   const dims = getAspectDimensions(aspectRatio);
+  // canvasRenderer.ts scales padding off a fixed 400px reference (`scale = exportWidth / 400`)
+  // regardless of aspect ratio. The preview box's on-screen width varies a lot by aspect
+  // (270-640px), so config.padding must be scaled the same way here, or the padded/available
+  // width — and therefore the effective content max-width — drifts from what actually exports.
+  const previewScale = parseFloat(dims.width) / 400;
 
-  // Reference (citation) badge/plain-text renderer, shared by top & bottom placement
-  const renderReference = () => {
+  // Reference (citation) badge/plain-text renderer, shared by top & bottom placement.
+  // Pass soloText to render just one language's reference (used by 'split' placement)
+  // instead of the usual Telugu+English joined string.
+  const renderReference = (soloText?: string) => {
     const ref = config.referenceStyle;
-    if (!ref.showTeluguRef && !ref.showEnglishRef) return null;
-    if (!config.referenceTe && !config.referenceEn) return null;
+    if (soloText === undefined) {
+      if (!ref.showTeluguRef && !ref.showEnglishRef) return null;
+      if (!config.referenceTe && !config.referenceEn) return null;
+    } else if (!soloText) {
+      return null;
+    }
 
     const isIntegrated = ref.placement === 'integrated';
 
@@ -93,14 +104,35 @@ export const WallpaperCanvas: React.FC<WallpaperCanvasProps> = ({
       fontStyle: isIntegrated ? 'italic' : 'normal',
     };
 
-    const content = (
+    // Chapter:verse numerals render in a plain standard-digit font rather than
+    // the (often decorative/Telugu) reference font, so they read normally.
+    const renderRefText = (text: string, key: string | number) => {
+      const segments = text.split(/(\d+(?:[:\-–,]\d+)*)/g).filter((p) => p.length > 0);
+      return (
+        <span key={key}>
+          {segments.map((seg, i) =>
+            /^\d[\d:\-–,]*\d$|^\d$/.test(seg) ? (
+              <span key={i} style={{ fontFamily: '"Inter", sans-serif', fontVariantNumeric: 'tabular-nums' }}>
+                {seg}
+              </span>
+            ) : (
+              <React.Fragment key={i}>{seg}</React.Fragment>
+            )
+          )}
+        </span>
+      );
+    };
+
+    const content = soloText !== undefined ? (
+      renderRefText(soloText, 'solo')
+    ) : (
       <>
         {isIntegrated && <span className="opacity-70 mr-1">—</span>}
-        {ref.showTeluguRef && config.referenceTe && <span>{config.referenceTe}</span>}
+        {ref.showTeluguRef && config.referenceTe && renderRefText(config.referenceTe, 'te')}
         {ref.showTeluguRef && ref.showEnglishRef && config.referenceTe && config.referenceEn && (
           <span className="opacity-40">•</span>
         )}
-        {ref.showEnglishRef && config.referenceEn && <span>{config.referenceEn}</span>}
+        {ref.showEnglishRef && config.referenceEn && renderRefText(config.referenceEn, 'en')}
       </>
     );
 
@@ -158,6 +190,15 @@ export const WallpaperCanvas: React.FC<WallpaperCanvasProps> = ({
   const showEnglish = config.layoutMode !== 'telugu-only';
   const isSideBySide = config.layoutMode === 'side-by-side';
   const isEnglishFirst = config.layoutMode === 'stacked-en-te';
+
+  // 'split' reference placement: each language gets its own reference next to its
+  // own text. Only valid for a stacked layout showing both languages — mirrors the
+  // canSplit fallback rule in canvasRenderer.ts so preview and export always match.
+  const canSplitRef = config.referenceStyle.placement === 'split' && showTelugu && showEnglish && !isSideBySide;
+  const splitTopText = isEnglishFirst ? config.referenceEn : config.referenceTe;
+  const splitBottomText = isEnglishFirst ? config.referenceTe : config.referenceEn;
+  const splitTopShown = isEnglishFirst ? config.referenceStyle.showEnglishRef : config.referenceStyle.showTeluguRef;
+  const splitBottomShown = isEnglishFirst ? config.referenceStyle.showTeluguRef : config.referenceStyle.showEnglishRef;
 
   const getAlignClass = (align: 'left' | 'center' | 'right') => {
     switch (align) {
@@ -299,7 +340,7 @@ export const WallpaperCanvas: React.FC<WallpaperCanvasProps> = ({
         <div
           className={`relative z-10 w-full h-full flex flex-col p-6 sm:p-8 overflow-y-auto no-scrollbar ${getVerticalAlignClass(config.verticalAlignment)}`}
           style={{
-            padding: config.padding,
+            padding: config.padding * previewScale,
             transform: `translate(${config.horizontalOffset ?? 0}%, ${config.verticalOffset ?? 0}%)`,
           }}
         >
@@ -347,7 +388,14 @@ export const WallpaperCanvas: React.FC<WallpaperCanvasProps> = ({
 
           {/* Reference (Top Placement) */}
           {config.referenceStyle.placement === 'top' && (
-            <div className="mb-4">{renderReference()}</div>
+            <div className="mb-5">{renderReference()}</div>
+          )}
+
+          {/* Reference (Split Placement) — top language's own reference above it.
+              Split only makes sense for a stacked layout with both languages shown;
+              otherwise it falls back to the combined Bottom block below. */}
+          {canSplitRef && splitTopShown && splitTopText && (
+            <div className="mb-2">{renderReference(splitTopText)}</div>
           )}
 
           {/* Decorative Opening Quote Mark */}
@@ -522,6 +570,9 @@ export const WallpaperCanvas: React.FC<WallpaperCanvasProps> = ({
                 {first}
                 {divider}
                 {second}
+                {canSplitRef && splitBottomShown && splitBottomText && (
+                  <div className="mt-2">{renderReference(splitBottomText)}</div>
+                )}
               </>
             );
           })()}
@@ -536,8 +587,9 @@ export const WallpaperCanvas: React.FC<WallpaperCanvasProps> = ({
             </div>
           )}
 
-          {/* Reference (Bottom / Integrated Placement) */}
-          {config.referenceStyle.placement !== 'top' && (
+          {/* Reference (Bottom / Integrated Placement, or Split's fallback when it
+              doesn't apply to the current layout) */}
+          {config.referenceStyle.placement !== 'top' && !canSplitRef && (
             <div className={config.referenceStyle.placement === 'integrated' ? 'mt-1.5' : 'mt-5'}>
               {renderReference()}
             </div>

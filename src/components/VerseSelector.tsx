@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ParallelVerse } from '../types';
 import { POPULAR_VERSES, BIBLE_BOOKS } from '../data/verses';
+import { getTeluguVerseText, getEnglishVerseText, parseVerseNumbers } from '../utils/bibleData';
 import {
   BookOpen,
   Search,
@@ -9,7 +10,9 @@ import {
   Sparkles,
   Tag,
   X,
-  FileText
+  FileText,
+  Loader2,
+  AlertTriangle
 } from 'lucide-react';
 
 interface VerseSelectorProps {
@@ -32,14 +35,64 @@ export const VerseSelector: React.FC<VerseSelectorProps> = ({
   // Custom Form Inputs — structured Book / Chapter / Verse picker
   const johnIndex = BIBLE_BOOKS.findIndex((b) => b.en === 'John');
   const [customBookIndex, setCustomBookIndex] = useState(johnIndex >= 0 ? johnIndex : 0);
-  const [customChapter, setCustomChapter] = useState(3);
+  const [customChapter, setCustomChapter] = useState('3');
   const [customVerseNum, setCustomVerseNum] = useState('16');
   const [customTeText, setCustomTeText] = useState('దేవుడు లోకమును ఎంతో ప్రేమించెను...');
   const [customEnText, setCustomEnText] = useState('For God so loved the world, that he gave his only begotten Son...');
 
+  // Auto-population state: verse text loads from the bundled BSI/KJV
+  // datasets whenever book/chapter/verse changes. Once the user edits a
+  // text field by hand, that field is left alone on future lookups so we
+  // never clobber their wording — until they change the reference again,
+  // which resets the "manually edited" flag for both fields.
+  const [isLoadingVerseText, setIsLoadingVerseText] = useState(false);
+  const [verseLookupNote, setVerseLookupNote] = useState<string | null>(null);
+  const teEditedRef = useRef(false);
+  const enEditedRef = useRef(false);
+
   const selectedBook = BIBLE_BOOKS[customBookIndex] || BIBLE_BOOKS[0];
-  const customRefTe = `${selectedBook.te} ${customChapter}:${customVerseNum}`;
-  const customRefEn = `${selectedBook.en} ${customChapter}:${customVerseNum}`;
+  const displayChapter = customChapter === '' ? '1' : customChapter;
+  const customRefTe = `${selectedBook.te} ${displayChapter}:${customVerseNum}`;
+  const customRefEn = `${selectedBook.en} ${displayChapter}:${customVerseNum}`;
+
+  // Auto-populate Telugu/English text from the bundled datasets whenever the
+  // book, chapter, or verse selection changes (debounced while typing).
+  useEffect(() => {
+    const chapterNum = Number(customChapter);
+    const verseNumbers = parseVerseNumbers(customVerseNum);
+    if (!chapterNum || chapterNum < 1 || verseNumbers.length === 0) return;
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setIsLoadingVerseText(true);
+      setVerseLookupNote(null);
+      try {
+        const [teResult, enResult] = await Promise.all([
+          getTeluguVerseText(customBookIndex, chapterNum, verseNumbers),
+          getEnglishVerseText(customBookIndex, chapterNum, verseNumbers),
+        ]);
+        if (cancelled) return;
+
+        if (!teEditedRef.current && teResult.text) setCustomTeText(teResult.text);
+        if (!enEditedRef.current && enResult.text) setCustomEnText(enResult.text);
+
+        if (!teResult.text && !enResult.text) {
+          setVerseLookupNote('No verse found at that reference — check chapter/verse.');
+        } else if (teResult.partial || enResult.partial) {
+          setVerseLookupNote('Some verses in that range were not found.');
+        }
+      } catch (err) {
+        if (!cancelled) setVerseLookupNote('Could not load verse text. You can still type it manually.');
+      } finally {
+        if (!cancelled) setIsLoadingVerseText(false);
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [customBookIndex, customChapter, customVerseNum]);
 
   // Extract unique categories
   const categories = ['All', ...Array.from(new Set(POPULAR_VERSES.map(v => v.category)))];
@@ -57,9 +110,11 @@ export const VerseSelector: React.FC<VerseSelectorProps> = ({
 
   const handleSelectBook = (idx: number) => {
     setCustomBookIndex(idx);
+    teEditedRef.current = false;
+    enEditedRef.current = false;
     const book = BIBLE_BOOKS[idx];
-    if (book && customChapter > book.chapters) {
-      setCustomChapter(1);
+    if (book && Number(customChapter) > book.chapters) {
+      setCustomChapter('1');
     }
   };
 
@@ -247,7 +302,26 @@ export const VerseSelector: React.FC<VerseSelectorProps> = ({
                     min={1}
                     max={selectedBook.chapters}
                     value={customChapter}
-                    onChange={(e) => setCustomChapter(Math.max(1, Math.min(selectedBook.chapters, Number(e.target.value) || 1)))}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      teEditedRef.current = false;
+                      enEditedRef.current = false;
+                      // Allow the field to be cleared while typing; don't force it back to 1.
+                      if (raw === '') {
+                        setCustomChapter('');
+                        return;
+                      }
+                      const num = Number(raw);
+                      if (!Number.isNaN(num)) {
+                        setCustomChapter(String(Math.max(1, Math.min(selectedBook.chapters, num))));
+                      }
+                    }}
+                    onBlur={() => {
+                      // Only snap back to a valid number once the user leaves the field.
+                      if (customChapter === '' || Number(customChapter) < 1) {
+                        setCustomChapter('1');
+                      }
+                    }}
                     className="w-full bg-black border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
                   />
                 </div>
@@ -259,11 +333,29 @@ export const VerseSelector: React.FC<VerseSelectorProps> = ({
                     type="text"
                     placeholder="e.g. 16 or 16-18"
                     value={customVerseNum}
-                    onChange={(e) => setCustomVerseNum(e.target.value)}
+                    onChange={(e) => {
+                      teEditedRef.current = false;
+                      enEditedRef.current = false;
+                      setCustomVerseNum(e.target.value);
+                    }}
                     className="w-full bg-black border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
                   />
                 </div>
               </div>
+
+              {/* Auto-population status */}
+              {isLoadingVerseText && (
+                <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <span>Loading verse text…</span>
+                </div>
+              )}
+              {!isLoadingVerseText && verseLookupNote && (
+                <div className="flex items-center gap-1.5 text-[11px] text-amber-400">
+                  <AlertTriangle className="w-3 h-3 shrink-0" />
+                  <span>{verseLookupNote}</span>
+                </div>
+              )}
 
               {/* Live reference preview */}
               <div className="flex items-center gap-2 text-xs pt-1">
@@ -276,12 +368,15 @@ export const VerseSelector: React.FC<VerseSelectorProps> = ({
             {/* Telugu Verse Text */}
             <div>
               <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                Telugu Verse Text (BSI Translation)
+                Telugu Verse Text (BSI Translation) — auto-filled, editable
               </label>
               <textarea
                 rows={3}
                 value={customTeText}
-                onChange={(e) => setCustomTeText(e.target.value)}
+                onChange={(e) => {
+                  teEditedRef.current = true;
+                  setCustomTeText(e.target.value);
+                }}
                 placeholder="తెలుగు వాక్యమును ఇక్కడ రాయండి లేదా పేస్ట్ చేయండి..."
                 className="w-full bg-black border border-zinc-800 rounded-xl p-3 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-amber-500 font-['Noto_Serif_Telugu'] leading-relaxed"
               />
@@ -290,12 +385,15 @@ export const VerseSelector: React.FC<VerseSelectorProps> = ({
             {/* English Verse Text */}
             <div>
               <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                English Verse Text (KJV Translation)
+                English Verse Text (KJV Translation) — auto-filled, editable
               </label>
               <textarea
                 rows={3}
                 value={customEnText}
-                onChange={(e) => setCustomEnText(e.target.value)}
+                onChange={(e) => {
+                  enEditedRef.current = true;
+                  setCustomEnText(e.target.value);
+                }}
                 placeholder="Type or paste the English King James scripture..."
                 className="w-full bg-black border border-zinc-800 rounded-xl p-3 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-amber-500 font-['Cinzel'] leading-relaxed"
               />
