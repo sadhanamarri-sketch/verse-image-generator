@@ -97,6 +97,34 @@ export async function renderWallpaperToCanvas(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
 
+  // 0. Ensure every custom web font this render will use is fully downloaded
+  // before we measure or draw a single word. The Google Fonts <link> uses
+  // `display=swap`, so on a fast/first export the font may still be mid-download:
+  // ctx.measureText() would silently measure with the fallback system font while
+  // ctx.fillText() moments later draws with the real (differently-sized) font once
+  // it swaps in — the two widths disagree and words creep backward, overlapping
+  // the word before them. Explicitly loading + awaiting document.fonts.ready keeps
+  // measurement and drawing consistent.
+  try {
+    const previewScale = width / 400;
+    const fontSpecs = new Set<string>();
+    const addSpec = (family: string, weight: string, italic: boolean, sizeSp: number) => {
+      const sizePx = Math.max(1, Math.round(sizeSp * previewScale));
+      fontSpecs.add(`${italic ? 'italic ' : ''}${weight} ${sizePx}px "${family}"`);
+    };
+    config.teluguWords.forEach(w => addSpec(w.fontFamily, w.fontWeight, w.isItalic, w.fontSizeSp));
+    config.englishWords.forEach(w => addSpec(w.fontFamily, w.fontWeight, w.isItalic, w.fontSizeSp));
+    addSpec(config.referenceStyle.fontFamily, config.referenceStyle.fontWeight, false, config.referenceStyle.fontSizeSp);
+    addSpec('Outfit', '500', false, 11);
+
+    if (document.fonts) {
+      await Promise.all(Array.from(fontSpecs).map(spec => document.fonts.load(spec).catch(() => {})));
+      await document.fonts.ready;
+    }
+  } catch {
+    // Font Loading API unavailable in this WebView — proceed with best-effort metrics.
+  }
+
   // 1. Draw Background
   const bg = config.background;
   if (bg.type === 'image' && bg.imageUrl) {
@@ -181,7 +209,7 @@ export async function renderWallpaperToCanvas(
 
   // 4. Compute Dynamic Typography Metrics
   const scale = width / 400; // Base reference scale from 400px preview
-  const paddingX = width * 0.08;
+  const paddingX = (config.padding ?? 24) * scale;
   // Content Max Width narrows the text column (like the live preview's CSS maxWidth)
   // and centers it within the outer padded safe area.
   const availableWidth = width - (paddingX * 2);
