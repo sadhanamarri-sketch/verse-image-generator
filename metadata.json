@@ -1,0 +1,6 @@
+{
+  "name": "Scripture Paper - Wallpaper Studio & Android Jetpack Compose Architect",
+  "description": "Live interactive Scripture Wallpaper Studio for parallel Telugu BSI & English KJV verses with multi-word selection and granular typography styling.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

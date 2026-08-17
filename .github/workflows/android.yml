@@ -1,0 +1,58 @@
+name: Android Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install web dependencies
+        run: bun install
+
+      - name: Build web assets
+        run: bun run build
+
+      # The android/ folder isn't committed to the repo, so generate it
+      # fresh each run. If you later commit android/ (recommended once you
+      # start customizing icons, permissions, signing, etc.), this step
+      # will just be skipped and `cap sync` will update it instead.
+      - name: Add Android platform (if missing)
+        run: |
+          if [ ! -d "android" ]; then
+            bunx cap add android
+          fi
+
+      - name: Sync web assets into the Android project
+        run: bunx cap sync android
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
