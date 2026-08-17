@@ -47,6 +47,7 @@ const createInitialConfig = (): WallpaperConfig => {
     padding: 24,
     containerMaxWidth: 100,
     sectionGap: 16,
+    wordSpacing: 10,
     verticalOffset: 0,
     horizontalOffset: 0,
     teluguWords: tokenizeStringToWords(INITIAL_VERSE.teluguBsi, 'telugu', {

@@ -182,7 +182,11 @@ export async function renderWallpaperToCanvas(
   // 4. Compute Dynamic Typography Metrics
   const scale = width / 400; // Base reference scale from 400px preview
   const paddingX = width * 0.08;
-  const maxContentWidth = width - (paddingX * 2);
+  // Content Max Width narrows the text column (like the live preview's CSS maxWidth)
+  // and centers it within the outer padded safe area.
+  const availableWidth = width - (paddingX * 2);
+  const maxContentWidth = availableWidth * ((config.containerMaxWidth ?? 100) / 100);
+  const contentOffsetX = paddingX + (availableWidth - maxContentWidth) / 2;
 
   // Measure and layout text items
   const showTe = config.layoutMode !== 'english-only';
@@ -265,7 +269,7 @@ export async function renderWallpaperToCanvas(
     const lines: WordRenderMeta[][] = [];
     let currentLine: WordRenderMeta[] = [];
     let currentLineWidth = 0;
-    const spaceWidth = 10 * scale;
+    const spaceWidth = (config.wordSpacing ?? 10) * scale;
 
     for (const w of wordMetas) {
       if (currentLine.length > 0 && currentLineWidth + spaceWidth + w.width > maxWidth) {
@@ -355,8 +359,8 @@ export async function renderWallpaperToCanvas(
     ctx.textAlign = config.referenceAlignment;
 
     let refX = width / 2;
-    if (config.referenceAlignment === 'left') refX = paddingX;
-    if (config.referenceAlignment === 'right') refX = width - paddingX;
+    if (config.referenceAlignment === 'left') refX = contentOffsetX;
+    if (config.referenceAlignment === 'right') refX = contentOffsetX + maxContentWidth;
 
     if (refStyle.showBadge && !isRefIntegrated) {
       const padX = 14 * scale;
@@ -365,9 +369,9 @@ export async function renderWallpaperToCanvas(
       const badgeHeight = refFontSize + padY * 2;
 
       let badgeLeft: number;
-      if (config.referenceAlignment === 'left') badgeLeft = paddingX;
-      else if (config.referenceAlignment === 'right') badgeLeft = width - paddingX - badgeWidth;
-      else badgeLeft = (width - badgeWidth) / 2;
+      if (config.referenceAlignment === 'left') badgeLeft = contentOffsetX;
+      else if (config.referenceAlignment === 'right') badgeLeft = contentOffsetX + maxContentWidth - badgeWidth;
+      else badgeLeft = contentOffsetX + (maxContentWidth - badgeWidth) / 2;
 
       const badgeTop = y - refFontSize * 0.85 - padY;
 
@@ -402,7 +406,7 @@ export async function renderWallpaperToCanvas(
 
   // Draw Lines Helper — draws within [regionX, regionX+regionWidth] starting at startY, returns the ending Y
   const drawLines = (lines: WordRenderMeta[][], startY: number, regionX: number, regionWidth: number): number => {
-    const spaceWidth = 10 * scale;
+    const spaceWidth = (config.wordSpacing ?? 10) * scale;
     let y = startY;
     for (const line of lines) {
       const lineHeight = Math.max(...line.map(w => w.height), 20 * scale);
@@ -472,14 +476,14 @@ export async function renderWallpaperToCanvas(
 
   if (isSideBySide && showTe && showEn) {
     // Side-by-side: Telugu in the left column, English in the right column
-    const teEndY = teluguLines.length > 0 ? drawLines(teluguLines, currentY, paddingX, colWidth) : currentY;
-    const enEndY = englishLines.length > 0 ? drawLines(englishLines, currentY, paddingX + colWidth + columnGap, colWidth) : currentY;
+    const teEndY = teluguLines.length > 0 ? drawLines(teluguLines, currentY, contentOffsetX, colWidth) : currentY;
+    const enEndY = englishLines.length > 0 ? drawLines(englishLines, currentY, contentOffsetX + colWidth + columnGap, colWidth) : currentY;
 
     if (config.showDivider) {
       ctx.save();
       ctx.strokeStyle = config.dividerColor || 'rgba(255,255,255,0.4)';
       ctx.lineWidth = Math.max(2, 2 * scale);
-      const divX = paddingX + colWidth + columnGap / 2;
+      const divX = contentOffsetX + colWidth + columnGap / 2;
       ctx.beginPath();
       ctx.moveTo(divX, currentY - (20 * scale));
       ctx.lineTo(divX, Math.max(teEndY, enEndY) - (16 * scale));
@@ -496,7 +500,7 @@ export async function renderWallpaperToCanvas(
     const secondShow = isEnglishFirst ? showTe : showEn;
 
     if (firstShow && firstLines.length > 0) {
-      currentY = drawLines(firstLines, currentY, paddingX, maxContentWidth);
+      currentY = drawLines(firstLines, currentY, contentOffsetX, maxContentWidth);
     }
 
     if (config.showDivider && showTe && showEn) {
@@ -515,7 +519,7 @@ export async function renderWallpaperToCanvas(
     }
 
     if (secondShow && secondLines.length > 0) {
-      currentY = drawLines(secondLines, currentY, paddingX, maxContentWidth);
+      currentY = drawLines(secondLines, currentY, contentOffsetX, maxContentWidth);
     }
   }
 

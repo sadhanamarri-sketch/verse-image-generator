@@ -363,8 +363,12 @@ export const WallpaperCanvas: React.FC<WallpaperCanvasProps> = ({
           {(() => {
             const renderWordBlock = (words: WordStyle[], language: 'telugu' | 'english') => (
               <div
-                className={`flex flex-wrap gap-x-1.5 gap-y-1.5 ${getAlignClass(config.layoutAlignment)}`}
-                style={{ marginTop: (config.sectionGap ?? 16) / 2, marginBottom: (config.sectionGap ?? 16) / 2 }}
+                className={`flex flex-wrap gap-y-1.5 ${getAlignClass(config.layoutAlignment)}`}
+                style={{
+                  marginTop: (config.sectionGap ?? 16) / 2,
+                  marginBottom: (config.sectionGap ?? 16) / 2,
+                  columnGap: `${config.wordSpacing ?? 10}px`,
+                }}
               >
                 {words.map((word) => {
                   const isSelected = selectedWordIds.includes(word.id);
@@ -397,8 +401,8 @@ export const WallpaperCanvas: React.FC<WallpaperCanvasProps> = ({
                       }`}
                       style={{
                         backgroundColor: highlightBg !== 'transparent' ? highlightBg : undefined,
-                        paddingLeft: highlightBg !== 'transparent' ? padX : 6,
-                        paddingRight: highlightBg !== 'transparent' ? padX : 6,
+                        paddingLeft: highlightBg !== 'transparent' ? padX : 3,
+                        paddingRight: highlightBg !== 'transparent' ? padX : 3,
                         paddingTop: highlightBg !== 'transparent' ? padY : 2,
                         paddingBottom: highlightBg !== 'transparent' ? padY : 2,
                         borderRadius: highlightBg !== 'transparent' ? radius : 4,

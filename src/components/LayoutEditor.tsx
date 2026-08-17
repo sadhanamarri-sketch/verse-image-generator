@@ -176,6 +176,24 @@ export const LayoutEditor: React.FC<LayoutEditorProps> = ({
         <p className="text-[10px] text-zinc-500">Narrows the text column so lines wrap sooner, useful for tighter poster-style layouts.</p>
       </div>
 
+      {/* Word Spacing */}
+      <div className="space-y-2">
+        <div className="flex justify-between text-xs text-zinc-300 mb-1">
+          <span>Word Spacing</span>
+          <span className="text-amber-400 font-semibold">{config.wordSpacing}px</span>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="40"
+          step="1"
+          value={config.wordSpacing}
+          onChange={(e) => onChangeConfig({ wordSpacing: Number(e.target.value) })}
+          className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
+        />
+        <p className="text-[10px] text-zinc-500">Gap between adjacent words on the same line.</p>
+      </div>
+
       {/* Section Gap (between Telugu & English blocks) */}
       <div className="space-y-2">
         <div className="flex justify-between text-xs text-zinc-300 mb-1">

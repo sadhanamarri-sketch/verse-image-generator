@@ -80,6 +80,7 @@ export interface WallpaperConfig {
   // Fine-grained layout controls
   containerMaxWidth: number; // percentage, 50 to 100
   sectionGap: number; // gap between Telugu & English blocks, in px
+  wordSpacing: number; // gap between adjacent words on a line, in px
   verticalOffset: number; // -50 to 50, nudges content up/down
   horizontalOffset: number; // -50 to 50, nudges content left/right
   teluguWords: WordStyle[];
