@@ -94,7 +94,7 @@ export interface WallpaperConfig {
     fontWeight: '400' | '600' | '700';
     showTeluguRef: boolean;
     showEnglishRef: boolean;
-    placement: 'top' | 'bottom' | 'integrated';
+    placement: 'top' | 'bottom' | 'integrated' | 'split';
     showBadge: boolean;
     badgeBg: string;
     badgeBorder: string;

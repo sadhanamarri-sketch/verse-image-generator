@@ -12,6 +12,7 @@ import {
   Merge,
   Check,
   Languages,
+  SplitSquareVertical,
 } from 'lucide-react';
 
 interface ReferenceEditorProps {
@@ -97,7 +98,7 @@ export const ReferenceEditor: React.FC<ReferenceEditorProps> = ({
       {/* Placement: Top / Bottom / Integrated */}
       <div className="space-y-2 pt-3 border-t border-zinc-800">
         <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400">Placement</h4>
-        <div className="grid grid-cols-3 gap-2 text-xs">
+        <div className="grid grid-cols-4 gap-2 text-xs">
           <button
             onClick={() => onUpdateRef({ placement: 'top' })}
             className={`flex flex-col items-center justify-center gap-1 py-2 rounded-lg border font-semibold transition cursor-pointer ${
@@ -132,10 +133,27 @@ export const ReferenceEditor: React.FC<ReferenceEditorProps> = ({
             <ArrowDown className="w-3.5 h-3.5" />
             <span>Bottom</span>
           </button>
+          <button
+            onClick={() => onUpdateRef({ placement: 'split' })}
+            title="Telugu reference above the Telugu text, English reference below the English text (or vice versa, matching your stacking order)"
+            className={`flex flex-col items-center justify-center gap-1 py-2 rounded-lg border font-semibold transition cursor-pointer ${
+              ref.placement === 'split'
+                ? 'border-amber-400 bg-amber-500/10 text-amber-300'
+                : 'border-zinc-800 bg-zinc-900 text-zinc-400 hover:border-zinc-700'
+            }`}
+          >
+            <SplitSquareVertical className="w-3.5 h-3.5" />
+            <span>Split</span>
+          </button>
         </div>
         {ref.placement === 'integrated' && (
           <p className="text-[10px] text-zinc-500 pt-0.5">
             Integrated mode drops the badge and renders the reference immediately after the verse text, like an inline citation.
+          </p>
+        )}
+        {ref.placement === 'split' && (
+          <p className="text-[10px] text-zinc-500 pt-0.5">
+            Each language gets its own reference, right next to its own text — whichever language is stacked on top gets its reference above it, and the other gets its reference below. Only works with a stacked layout showing both languages; otherwise this falls back to Bottom.
           </p>
         )}
       </div>

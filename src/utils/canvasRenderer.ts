@@ -344,10 +344,30 @@ export async function renderWallpaperToCanvas(
     && (!!config.referenceTe || !!config.referenceEn);
   const isRefOnTop = config.referenceStyle.placement === 'top';
   const isRefIntegrated = config.referenceStyle.placement === 'integrated';
+  const isRefSplit = config.referenceStyle.placement === 'split';
+  // Split only makes sense when Telugu and English are stacked one above the
+  // other; for side-by-side or single-language layouts it falls back to a
+  // single combined block at the bottom (same as 'bottom' placement).
+  const canSplit = isRefSplit && showTe && showEn && !isSideBySide;
   // Integrated mode sits tight against the verse text, like an inline citation,
   // rather than occupying its own separated block.
   const refGap = isRefIntegrated ? 6 * scale : 16 * scale;
-  const refHeight = showRef ? (36 * scale) + refGap : 0;
+  const singleRefBlockHeight = (36 * scale) + refGap;
+
+  // In split mode, whichever language is drawn first (top of the stack) gets
+  // its own reference above it, and whichever is drawn second (bottom of the
+  // stack) gets its own reference below it — each only if that language's ref
+  // toggle is on and it has text.
+  const splitTopText = isEnglishFirst ? config.referenceEn : config.referenceTe;
+  const splitBottomText = isEnglishFirst ? config.referenceTe : config.referenceEn;
+  const splitTopShown = isEnglishFirst ? config.referenceStyle.showEnglishRef : config.referenceStyle.showTeluguRef;
+  const splitBottomShown = isEnglishFirst ? config.referenceStyle.showTeluguRef : config.referenceStyle.showEnglishRef;
+  const splitTopHeight = (canSplit && splitTopShown && splitTopText) ? singleRefBlockHeight : 0;
+  const splitBottomHeight = (canSplit && splitBottomShown && splitBottomText) ? singleRefBlockHeight : 0;
+
+  const refHeight = canSplit
+    ? splitTopHeight + splitBottomHeight
+    : (showRef ? singleRefBlockHeight : 0);
 
   totalContentHeight = isSideBySide
     ? Math.max(teHeight, enHeight) + refHeight
@@ -362,17 +382,29 @@ export async function renderWallpaperToCanvas(
   }
 
   // Draws the reference (citation) badge or plain text, baseline at y. Honors
-  // placement/badge/color/letter-spacing from config.referenceStyle.
-  const drawReferenceBlock = (y: number) => {
+  // placement/badge/color/letter-spacing from config.referenceStyle. Pass
+  // soloText for split mode to draw just one language's reference instead of
+  // the usual Telugu+English joined string.
+  const drawReferenceBlock = (y: number, soloText?: string) => {
     if (!showRef) return;
     const refStyle = config.referenceStyle;
-    const parts: string[] = [];
-    if (refStyle.showTeluguRef && config.referenceTe) parts.push(config.referenceTe);
-    if (refStyle.showEnglishRef && config.referenceEn) parts.push(config.referenceEn);
-    const joined = parts.join(' • ');
+    let joined: string;
+    if (soloText !== undefined) {
+      joined = soloText;
+    } else {
+      const parts: string[] = [];
+      if (refStyle.showTeluguRef && config.referenceTe) parts.push(config.referenceTe);
+      if (refStyle.showEnglishRef && config.referenceEn) parts.push(config.referenceEn);
+      joined = parts.join(' • ');
+    }
     if (!joined) return;
     // Integrated placement reads as an inline citation woven right after the verse text.
     const refString = isRefIntegrated ? `— ${joined}` : joined;
+
+    // Everything below mutates ctx state (font, textAlign, letterSpacing). Scope it
+    // to this call so it can't leak into whatever draws next — critical when
+    // placement is 'top', since this runs *before* the verse words are drawn.
+    ctx.save();
 
     const refFontSize = Math.round(refStyle.fontSizeSp * scale);
     ctx.font = `${isRefIntegrated ? 'italic ' : ''}${refStyle.fontWeight} ${refFontSize}px "${refStyle.fontFamily}", sans-serif`;
@@ -413,16 +445,12 @@ export async function renderWallpaperToCanvas(
       ctx.restore();
     }
 
-    ctx.save();
     ctx.fillStyle = refStyle.color || '#FBBF24';
     ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
     ctx.shadowBlur = 6 * scale;
     ctx.fillText(refString, refX, y);
-    ctx.restore();
 
-    if ('letterSpacing' in ctx) {
-      (ctx as any).letterSpacing = '0px';
-    }
+    ctx.restore();
   };
 
   // Reference at Top: draw first, then push content down past it
@@ -430,6 +458,14 @@ export async function renderWallpaperToCanvas(
     const refFontSize = Math.round(config.referenceStyle.fontSizeSp * scale);
     drawReferenceBlock(currentY + refFontSize * 0.85);
     currentY += refHeight;
+  }
+
+  // Split, top half: the reference for whichever language is drawn first
+  // (e.g. Telugu, when Telugu is on top) goes directly above it.
+  if (canSplit && splitTopHeight > 0) {
+    const refFontSize = Math.round(config.referenceStyle.fontSizeSp * scale);
+    drawReferenceBlock(currentY + refFontSize * 0.85, splitTopText);
+    currentY += splitTopHeight;
   }
 
   // Draw Lines Helper — draws within [regionX, regionX+regionWidth] starting at startY, returns the ending Y
@@ -549,10 +585,19 @@ export async function renderWallpaperToCanvas(
     if (secondShow && secondLines.length > 0) {
       currentY = drawLines(secondLines, currentY, contentOffsetX, maxContentWidth);
     }
+
+    // Split, bottom half: the reference for whichever language is drawn second
+    // (e.g. English, when Telugu is on top) goes directly below it.
+    if (canSplit && splitBottomHeight > 0) {
+      currentY += refGap;
+      drawReferenceBlock(currentY, splitBottomText);
+      currentY += splitBottomHeight - refGap;
+    }
   }
 
-  // 4. Draw Reference Badge (bottom placement only — top was drawn earlier)
-  if (showRef && !isRefOnTop) {
+  // 4. Draw Reference Badge (bottom placement only — top was drawn earlier;
+  // split places its two halves inline with each language block instead)
+  if (showRef && !isRefOnTop && !canSplit) {
     currentY += refGap;
     drawReferenceBlock(currentY);
   }
