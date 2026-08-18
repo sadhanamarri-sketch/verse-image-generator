@@ -730,10 +730,9 @@ export async function renderWallpaperToCanvas(
   }
 
   // Draw Lines Helper — draws within [regionX, regionX+regionWidth] starting at startY, returns the ending Y.
-  // Matches the preview's flex-wrap `gap-y-1.5` (6px) between wrapped lines of the
-  // SAME paragraph — distinct from the larger sectionGap margin applied between
+  // Uses `wrapLineGap` (defined above) between wrapped lines of the SAME
+  // paragraph — distinct from the larger sectionGap margin applied between
   // separate language blocks, which is added by the caller after this returns.
-  const wrapLineGap = 6 * scale;
   const drawLines = (lines: WordRenderMeta[][], startY: number, regionX: number, regionWidth: number): number => {
     const spaceWidth = (config.wordSpacing ?? 10) * scale;
     let y = startY;
