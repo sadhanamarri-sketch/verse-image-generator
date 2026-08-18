@@ -1,16 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ParallelVerse } from '../types';
-import { POPULAR_VERSES, BIBLE_BOOKS } from '../data/verses';
+import { BIBLE_BOOKS } from '../data/verses';
 import { getTeluguVerseText, getEnglishVerseText, parseVerseNumbers } from '../utils/bibleData';
 import {
   BookOpen,
-  Search,
-  Check,
-  PlusCircle,
-  Sparkles,
-  Tag,
   X,
-  FileText,
   Loader2,
   AlertTriangle
 } from 'lucide-react';
@@ -28,10 +22,6 @@ export const VerseSelector: React.FC<VerseSelectorProps> = ({
   onCustomVerseSubmit,
   onClose,
 }) => {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [isCustomMode, setIsCustomMode] = useState(false);
-
   // Custom Form Inputs — structured Book / Chapter / Verse picker
   const johnIndex = BIBLE_BOOKS.findIndex((b) => b.en === 'John');
   const [customBookIndex, setCustomBookIndex] = useState(johnIndex >= 0 ? johnIndex : 0);
@@ -94,20 +84,6 @@ export const VerseSelector: React.FC<VerseSelectorProps> = ({
     };
   }, [customBookIndex, customChapter, customVerseNum]);
 
-  // Extract unique categories
-  const categories = ['All', ...Array.from(new Set(POPULAR_VERSES.map(v => v.category)))];
-
-  const filteredVerses = POPULAR_VERSES.filter((v) => {
-    const matchesCategory = selectedCategory === 'All' || v.category === selectedCategory;
-    const q = searchQuery.toLowerCase();
-    const matchesSearch = !q ||
-      v.referenceEn.toLowerCase().includes(q) ||
-      v.referenceTe.toLowerCase().includes(q) ||
-      v.englishKjv.toLowerCase().includes(q) ||
-      v.teluguBsi.toLowerCase().includes(q);
-    return matchesCategory && matchesSearch;
-  });
-
   const handleSelectBook = (idx: number) => {
     setCustomBookIndex(idx);
     teEditedRef.current = false;
@@ -138,10 +114,10 @@ export const VerseSelector: React.FC<VerseSelectorProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold text-white font-['Outfit']">
-                Scripture Library (తెలుగు BSI & English KJV)
+                Add Scripture Verse (తెలుగు BSI & English KJV)
               </h2>
               <p className="text-xs text-zinc-400">
-                Choose a pre-formatted parallel verse or input your own custom passage
+                Input your custom Telugu &amp; English passage
               </p>
             </div>
           </div>
@@ -153,125 +129,8 @@ export const VerseSelector: React.FC<VerseSelectorProps> = ({
           </button>
         </div>
 
-        {/* Mode Toggle: Preset Catalog vs Custom Input */}
-        <div className="flex border-b border-zinc-800 bg-black/50 p-2 gap-2 text-xs">
-          <button
-            onClick={() => setIsCustomMode(false)}
-            className={`flex-1 py-2 rounded-xl font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
-              !isCustomMode
-                ? 'bg-amber-500 text-black shadow-md shadow-amber-500/20'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-850'
-            }`}
-          >
-            <BookOpen className="w-4 h-4" />
-            <span>Curated Parallel Verses</span>
-          </button>
-
-          <button
-            onClick={() => setIsCustomMode(true)}
-            className={`flex-1 py-2 rounded-xl font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
-              isCustomMode
-                ? 'bg-amber-500 text-black shadow-md shadow-amber-500/20'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-850'
-            }`}
-          >
-            <PlusCircle className="w-4 h-4" />
-            <span>Manual Scripture Input</span>
-          </button>
-        </div>
-
-        {/* Mode 1: Verse Library */}
-        {!isCustomMode ? (
-          <div className="flex flex-col flex-1 overflow-hidden">
-            {/* Search & Category Filter */}
-            <div className="p-4 border-b border-zinc-800/80 bg-[#141417] space-y-3">
-              {/* Search Bar */}
-              <div className="relative">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
-                <input
-                  type="text"
-                  placeholder="Search reference (e.g. John 3:16, కీర్తనలు, shepherd, ప్రేమ)..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-black border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-xs sm:text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              {/* Category Chips */}
-              <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-                {categories.map((cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => setSelectedCategory(cat)}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition cursor-pointer ${
-                      selectedCategory === cat
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 font-semibold'
-                        : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Verses Scrollable List */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {filteredVerses.map((verse) => {
-                const isSelected = currentVerseId === verse.id;
-                return (
-                  <div
-                    key={verse.id}
-                    onClick={() => {
-                      onSelectVerse(verse);
-                      onClose();
-                    }}
-                    className={`p-4 rounded-xl border transition cursor-pointer ${
-                      isSelected
-                        ? 'bg-amber-500/10 border-amber-500/80 shadow-md ring-1 ring-amber-500/40'
-                        : 'bg-black/40 border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900/60'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-amber-400 font-['Outfit']">
-                          {verse.referenceEn}
-                        </span>
-                        <span className="text-xs text-zinc-400">•</span>
-                        <span className="font-bold text-sm text-amber-300 font-['Noto_Serif_Telugu']">
-                          {verse.referenceTe}
-                        </span>
-                      </div>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700">
-                        {verse.category}
-                      </span>
-                    </div>
-
-                    {/* Telugu Text Preview */}
-                    <p className="text-xs sm:text-sm text-zinc-100 font-['Noto_Serif_Telugu'] line-clamp-2 leading-relaxed mb-1.5">
-                      {verse.teluguBsi}
-                    </p>
-
-                    {/* English Text Preview */}
-                    <p className="text-xs text-zinc-300 font-['Cinzel'] line-clamp-2 opacity-90">
-                      {verse.englishKjv}
-                    </p>
-                  </div>
-                );
-              })}
-
-              {filteredVerses.length === 0 && (
-                <div className="text-center py-10 text-zinc-500">
-                  <FileText className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                  <p className="text-xs">No matching verses found for "{searchQuery}".</p>
-                  <p className="text-[11px] text-zinc-600 mt-1">Try switching to custom input tab.</p>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          /* Mode 2: Custom Verse Input Form */
-          <form onSubmit={handleCustomSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
+        {/* Manual Scripture Input Form */}
+        <form onSubmit={handleCustomSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
             
             {/* Book / Chapter / Verse Picker */}
             <div className="rounded-xl border border-zinc-800 bg-black/40 p-3 space-y-3">
@@ -414,8 +273,7 @@ export const VerseSelector: React.FC<VerseSelectorProps> = ({
                 Apply Custom Verse
               </button>
             </div>
-          </form>
-        )}
+        </form>
 
       </div>
     </div>

@@ -171,7 +171,7 @@ export const LayoutEditor: React.FC<LayoutEditorProps> = ({
           step="2"
           value={config.containerMaxWidth}
           onChange={(e) => onChangeConfig({ containerMaxWidth: Number(e.target.value) })}
-          className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
+          className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer touch-pan-y"
         />
         <p className="text-[10px] text-zinc-500">Narrows the text column so lines wrap sooner, useful for tighter poster-style layouts.</p>
       </div>
@@ -189,7 +189,7 @@ export const LayoutEditor: React.FC<LayoutEditorProps> = ({
           step="1"
           value={config.wordSpacing}
           onChange={(e) => onChangeConfig({ wordSpacing: Number(e.target.value) })}
-          className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
+          className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer touch-pan-y"
         />
         <p className="text-[10px] text-zinc-500">Gap between adjacent words on the same line.</p>
       </div>
@@ -207,7 +207,7 @@ export const LayoutEditor: React.FC<LayoutEditorProps> = ({
           step="2"
           value={config.sectionGap}
           onChange={(e) => onChangeConfig({ sectionGap: Number(e.target.value) })}
-          className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
+          className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer touch-pan-y"
         />
       </div>
 
@@ -224,7 +224,7 @@ export const LayoutEditor: React.FC<LayoutEditorProps> = ({
           step="2"
           value={config.padding}
           onChange={(e) => onChangeConfig({ padding: Number(e.target.value) })}
-          className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
+          className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer touch-pan-y"
         />
       </div>
 
@@ -246,7 +246,7 @@ export const LayoutEditor: React.FC<LayoutEditorProps> = ({
             step="1"
             value={config.verticalOffset}
             onChange={(e) => onChangeConfig({ verticalOffset: Number(e.target.value) })}
-            className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
+            className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer touch-pan-y"
           />
         </div>
 
@@ -262,7 +262,7 @@ export const LayoutEditor: React.FC<LayoutEditorProps> = ({
             step="1"
             value={config.horizontalOffset}
             onChange={(e) => onChangeConfig({ horizontalOffset: Number(e.target.value) })}
-            className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
+            className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer touch-pan-y"
           />
         </div>
 
@@ -324,7 +324,7 @@ export const LayoutEditor: React.FC<LayoutEditorProps> = ({
                 onChange={(e) => onChangeConfig({
                   cardBackdrop: { ...config.cardBackdrop, opacity: Number(e.target.value) }
                 })}
-                className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
+                className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer touch-pan-y"
               />
             </div>
 
@@ -342,7 +342,7 @@ export const LayoutEditor: React.FC<LayoutEditorProps> = ({
                 onChange={(e) => onChangeConfig({
                   cardBackdrop: { ...config.cardBackdrop, blur: Number(e.target.value) }
                 })}
-                className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
+                className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer touch-pan-y"
               />
             </div>
 
@@ -360,7 +360,7 @@ export const LayoutEditor: React.FC<LayoutEditorProps> = ({
                 onChange={(e) => onChangeConfig({
                   cardBackdrop: { ...config.cardBackdrop, borderRadius: Number(e.target.value) }
                 })}
-                className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
+                className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer touch-pan-y"
               />
             </div>
 
@@ -445,7 +445,7 @@ export const LayoutEditor: React.FC<LayoutEditorProps> = ({
                 step="2"
                 value={config.crossSize}
                 onChange={(e) => onChangeConfig({ crossSize: Number(e.target.value) })}
-                className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer mt-2.5"
+                className="w-full accent-amber-500 bg-zinc-800 h-2 rounded-lg cursor-pointer touch-pan-y mt-2.5"
               />
             </div>
           </div>

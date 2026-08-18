@@ -464,7 +464,12 @@ export async function renderWallpaperToCanvas(
   const getLinesHeight = (lines: WordRenderMeta[][]) => {
     return lines.reduce((acc, line, idx) => {
       const maxH = Math.max(...line.map(w => w.rowHeight), 20 * scale);
-      return acc + maxH + (idx < lines.length - 1 ? wrapLineGap : 0);
+      // Mirror drawLines' first-line ascent offset so the height reserved
+      // here matches what actually gets drawn — otherwise vertical
+      // centering drifts by that offset (roughly 0.85× the first line's
+      // font size) for every block that has one.
+      const ascentAdj = idx === 0 ? Math.max(...line.map(w => w.fontSize)) * 0.85 : 0;
+      return acc + maxH + ascentAdj + (idx < lines.length - 1 ? wrapLineGap : 0);
     }, 0);
   };
 
@@ -782,6 +787,20 @@ export async function renderWallpaperToCanvas(
     let y = startY;
     lines.forEach((line, lineIdx) => {
       const lineHeight = Math.max(...line.map(w => w.rowHeight), 20 * scale);
+
+      // Canvas's default textBaseline is 'alphabetic', so fillText(text, x, y)
+      // plants the baseline AT y — the glyphs themselves render above it. Every
+      // other element in this file (highlight boxes, badges, quote marks)
+      // compensates for that with a `fontSize * 0.85` ascent offset; this was
+      // the one place that didn't, so the first line of a text block visually
+      // started above `startY` instead of at it. That's what made the divider
+      // look closer to whichever block was drawn second (its un-offset first
+      // line got pulled up toward the divider by its own ascent).
+      if (lineIdx === 0) {
+        const maxFontSize = Math.max(...line.map(w => w.fontSize));
+        y += maxFontSize * 0.85;
+      }
+
       const totalLineWidth = line.reduce((sum, w, i) => sum + w.boxWidth + (i > 0 ? spaceWidth : 0), 0);
 
       let lineStartX = regionX;

@@ -45,7 +45,7 @@ const createInitialConfig = (): WallpaperConfig => {
     verticalAlignment: 'center',
     referenceAlignment: 'center',
     padding: 24,
-    containerMaxWidth: 100,
+    containerMaxWidth: 85,
     sectionGap: 16,
     wordSpacing: 10,
     verticalOffset: 0,

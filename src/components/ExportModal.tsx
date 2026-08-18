@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { WallpaperConfig } from '../types';
 import { downloadWallpaper, shareWallpaper, renderWallpaperToCanvas, getResolutionForAspect } from '../utils/canvasRenderer';
-import confetti from 'canvas-confetti';
 import {
   Download,
   Sparkles,
@@ -36,14 +35,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({ config, onClose }) => 
     try {
       const dataUrl = await downloadWallpaper(config, format, quality);
       setPreviewUrl(dataUrl);
-
-      // Trigger Confetti Celebration
-      confetti({
-        particleCount: 80,
-        spread: 60,
-        origin: { y: 0.7 },
-        colors: ['#FBBF24', '#38BDF8', '#34D399', '#FDA4AF']
-      });
     } catch (err) {
       console.error('Export error:', err);
     } finally {
