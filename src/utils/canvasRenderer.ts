@@ -252,7 +252,7 @@ export async function renderWallpaperToCanvas(
       width / 2, height / 2, Math.max(width, height) * 0.7
     );
     radial.addColorStop(0, 'rgba(0,0,0,0)');
-    radial.addColorStop(1, `rgba(0,0,0,${bg.vignette * 0.8})`);
+    radial.addColorStop(1, `rgba(0,0,0,${bg.vignette * 0.85})`);
     ctx.fillStyle = radial;
     ctx.fillRect(0, 0, width, height);
     ctx.restore();
@@ -346,6 +346,17 @@ export async function renderWallpaperToCanvas(
     shadowOffsetY: number;
     width: number;
     height: number;
+    // Horizontal padding this word occupies in the preview's word "button"
+    // (highlightPaddingX when highlighted, or the CSS fallback of 3px when
+    // not — every word button carries this padding whether highlighted or
+    // not). Included in boxWidth so wrapping/centering match the preview.
+    layoutPadX: number;
+    boxWidth: number;
+    // Same idea, vertically: paddingTop/Bottom on the button (highlightPaddingY
+    // when highlighted, else a 2px CSS fallback) adds to each wrapped row's
+    // real height in the preview.
+    layoutPadY: number;
+    rowHeight: number;
     x?: number;
     y?: number;
   }
@@ -370,6 +381,15 @@ export async function renderWallpaperToCanvas(
       const textToDraw = applyTextTransform(w.text, w);
       const metrics = ctx.measureText(textToDraw);
       const lineHeight = w.lineHeight ?? 1.3;
+      // Mirrors WallpaperCanvas.tsx's per-word <button>: paddingLeft/Right is
+      // highlightPaddingX when highlighted, otherwise a hardcoded 3px — that
+      // 3px fallback still widens every plain word's box in the preview, so
+      // it must be included here or the canvas underestimates line width and
+      // wraps later than the preview does.
+      const hasHighlight = !!w.highlightColor && (w.highlightOpacity ?? 0) > 0;
+      const layoutPadX = (hasHighlight ? (w.highlightPaddingX ?? 4) : 3) * scale;
+      const layoutPadY = (hasHighlight ? (w.highlightPaddingY ?? 2) : 2) * scale;
+      const wordHeight = fontSize * lineHeight;
       return {
         text: textToDraw,
         color: w.color,
@@ -390,7 +410,11 @@ export async function renderWallpaperToCanvas(
         shadowOffsetX: (w.shadowOffsetX ?? 0) * scale,
         shadowOffsetY: (w.shadowOffsetY ?? 2) * scale,
         width: metrics.width,
-        height: fontSize * lineHeight
+        height: wordHeight,
+        layoutPadX,
+        boxWidth: metrics.width + layoutPadX * 2,
+        layoutPadY,
+        rowHeight: wordHeight + layoutPadY * 2
       };
     });
   };
@@ -402,13 +426,13 @@ export async function renderWallpaperToCanvas(
     const spaceWidth = (config.wordSpacing ?? 10) * scale;
 
     for (const w of wordMetas) {
-      if (currentLine.length > 0 && currentLineWidth + spaceWidth + w.width > maxWidth) {
+      if (currentLine.length > 0 && currentLineWidth + spaceWidth + w.boxWidth > maxWidth) {
         lines.push(currentLine);
         currentLine = [w];
-        currentLineWidth = w.width;
+        currentLineWidth = w.boxWidth;
       } else {
         currentLine.push(w);
-        currentLineWidth += (currentLine.length === 1 ? 0 : spaceWidth) + w.width;
+        currentLineWidth += (currentLine.length === 1 ? 0 : spaceWidth) + w.boxWidth;
       }
     }
     if (currentLine.length > 0) {
@@ -439,14 +463,23 @@ export async function renderWallpaperToCanvas(
   let totalContentHeight = 0;
   const getLinesHeight = (lines: WordRenderMeta[][]) => {
     return lines.reduce((acc, line, idx) => {
-      const maxH = Math.max(...line.map(w => w.height), 20 * scale);
+      const maxH = Math.max(...line.map(w => w.rowHeight), 20 * scale);
       return acc + maxH + (idx < lines.length - 1 ? wrapLineGap : 0);
     }, 0);
   };
 
   const teHeight = showTe ? getLinesHeight(teluguLines) : 0;
   const enHeight = showEn ? getLinesHeight(englishLines) : 0;
-  const dividerHeight = (config.showDivider && showTe && showEn && !isSideBySide) ? 8 * scale : 0;
+  const dividerShown = config.showDivider && showTe && showEn && !isSideBySide;
+  const dividerHeight = dividerShown ? 8 * scale : 0;
+  // The preview's word blocks (renderWordBlock) always carry sectionGap/2
+  // margin top+bottom. When a divider is shown, the divider itself ALSO
+  // carries a full sectionGap margin top+bottom (see WallpaperCanvas.tsx's
+  // `gapStyle`). Flexbox doesn't collapse margins between siblings, so with
+  // a divider the true gap is block(sectionGap/2) + divider(sectionGap) +
+  // divider(sectionGap) + block(sectionGap/2) = 3× sectionGap; without one
+  // it's just block(sectionGap/2) + block(sectionGap/2) = 1× sectionGap.
+  const interBlockSpacing = (showTe && showEn) ? (dividerShown ? sectionSpacing * 3 : sectionSpacing) : 0;
   const showRef = (config.referenceStyle.showTeluguRef || config.referenceStyle.showEnglishRef)
     && (!!config.referenceTe || !!config.referenceEn);
   const isRefOnTop = config.referenceStyle.placement === 'top';
@@ -479,21 +512,30 @@ export async function renderWallpaperToCanvas(
   // Decorative extras (cross icon, quote marks) add their own height, matching
   // the preview's icon size + margin (cross: mb-4 ≈ 16px; quote marks: 28px
   // icon each, tightened by -mb-2/-mt-2 ≈ 8px overlap into the text below/above).
-  const crossBlockHeight = config.showCross ? (config.crossSize * scale) + (16 * scale) : 0;
+  // Circle around the cross icon has its own 10px padding (`rounded-full
+  // p-2.5`) on top of the icon size, plus the block's own 16px bottom margin
+  // (`mb-4`) — both must be reserved, not just the margin.
+  const crossBlockHeight = config.showCross ? (config.crossSize * scale) + (20 * scale) + (16 * scale) : 0;
   const quoteMarkHeight = config.quoteMarks ? (28 * scale) - (8 * scale) : 0;
   const decorHeight = crossBlockHeight + quoteMarkHeight * 2;
 
   totalContentHeight = (isSideBySide
     ? Math.max(teHeight, enHeight) + refHeight
-    : teHeight + enHeight + dividerHeight + refHeight + (showTe && showEn ? sectionSpacing : 0))
+    : teHeight + enHeight + dividerHeight + refHeight + interBlockSpacing)
     + decorHeight + cardPad * 2;
 
-  // Determine starting Y based on vertical alignment
+  // Determine starting Y based on vertical alignment.
+  // Preview uses fixed Tailwind `pt-12`/`pb-12` (48px raw CSS px on the
+  // preview box) for top/bottom — not a percentage of the box's height — so
+  // it must be scaled the same way every other raw pixel value in this file
+  // is (by `scale`, off the preview's reference width), not by canvas height.
+  // The old `height * 0.18` / `height * 0.15` badly overshot this (e.g. at
+  // 1080×1920 it placed content ~345px/288px from the edge instead of ~136px).
   let currentY = (height - totalContentHeight) / 2;
   if (config.verticalAlignment === 'top') {
-    currentY = height * 0.18;
+    currentY = 48 * scale;
   } else if (config.verticalAlignment === 'bottom') {
-    currentY = height - totalContentHeight - (height * 0.15);
+    currentY = height - totalContentHeight - (48 * scale);
   }
 
   // Draws the reference (citation) badge or plain text, baseline at y. Honors
@@ -546,8 +588,10 @@ export async function renderWallpaperToCanvas(
     if (config.referenceAlignment === 'right') refX = contentOffsetX + maxContentWidth - textWidth;
 
     if (refStyle.showBadge && !isRefIntegrated) {
-      const padX = 14 * scale;
-      const padY = 8 * scale;
+      // Preview badge is Tailwind `px-3 py-1` = 12px horizontal / 4px vertical
+      // padding — not 14/8.
+      const padX = 12 * scale;
+      const padY = 4 * scale;
       const badgeWidth = textWidth + padX * 2;
       const badgeHeight = refFontSize + padY * 2;
 
@@ -737,8 +781,8 @@ export async function renderWallpaperToCanvas(
     const spaceWidth = (config.wordSpacing ?? 10) * scale;
     let y = startY;
     lines.forEach((line, lineIdx) => {
-      const lineHeight = Math.max(...line.map(w => w.height), 20 * scale);
-      const totalLineWidth = line.reduce((sum, w, i) => sum + w.width + (i > 0 ? spaceWidth : 0), 0);
+      const lineHeight = Math.max(...line.map(w => w.rowHeight), 20 * scale);
+      const totalLineWidth = line.reduce((sum, w, i) => sum + w.boxWidth + (i > 0 ? spaceWidth : 0), 0);
 
       let lineStartX = regionX;
       if (config.layoutAlignment === 'center') {
@@ -747,20 +791,23 @@ export async function renderWallpaperToCanvas(
         lineStartX = regionX + regionWidth - totalLineWidth;
       }
 
+      // curX tracks the left edge of each word's box (text width + its
+      // layout padding on both sides), matching the preview's per-word
+      // button — not just the glyph's left edge.
       let curX = lineStartX;
       for (const w of line) {
         ctx.font = w.font;
+        const textX = curX + w.layoutPadX;
 
         // Draw highlight box if present, honoring per-word padding & corner radius
         if (w.highlightColor && (w.highlightOpacity ?? 0) > 0) {
           ctx.save();
           ctx.fillStyle = w.highlightColor;
           ctx.globalAlpha = w.highlightOpacity || 0.4;
-          const padX = w.highlightPaddingX;
           const padY = w.highlightPaddingY;
-          const boxX = curX - padX;
+          const boxX = curX;
           const boxY = y - (w.fontSize * 0.85) - padY;
-          const boxW = w.width + (padX * 2);
+          const boxW = w.boxWidth;
           const boxH = w.fontSize * 1.2 + (padY * 2);
           if (w.highlightRadius > 0) {
             roundRectPath(ctx, boxX, boxY, boxW, boxH, w.highlightRadius);
@@ -778,7 +825,7 @@ export async function renderWallpaperToCanvas(
         ctx.shadowOffsetX = w.shadowOffsetX;
         ctx.shadowOffsetY = w.shadowOffsetY;
         ctx.fillStyle = w.color;
-        ctx.fillText(w.text, curX, y);
+        ctx.fillText(w.text, textX, y);
         ctx.restore();
 
         // Underline, drawn beneath the text baseline
@@ -788,13 +835,13 @@ export async function renderWallpaperToCanvas(
           ctx.lineWidth = Math.max(1, w.fontSize * 0.06);
           const underlineY = y + w.fontSize * 0.12;
           ctx.beginPath();
-          ctx.moveTo(curX, underlineY);
-          ctx.lineTo(curX + w.width, underlineY);
+          ctx.moveTo(textX, underlineY);
+          ctx.lineTo(textX + w.width, underlineY);
           ctx.stroke();
           ctx.restore();
         }
 
-        curX += w.width + spaceWidth;
+        curX += w.boxWidth + spaceWidth;
       }
 
       y += lineHeight + (lineIdx < lines.length - 1 ? wrapLineGap : 0);
@@ -919,9 +966,12 @@ export async function renderWallpaperToCanvas(
     }
 
     if (config.showDivider && showTe && showEn) {
-      currentY += sectionSpacing / 2;
+      // 1.5× on each side of the divider = 3× total, matching the block's
+      // own sectionGap/2 margin plus the divider's full sectionGap margin
+      // stacking on both sides (see interBlockSpacing comment above).
+      currentY += sectionSpacing * 1.5;
       drawDivider(currentY);
-      currentY += sectionSpacing / 2;
+      currentY += sectionSpacing * 1.5;
     } else if (showTe && showEn) {
       currentY += sectionSpacing;
     }
