@@ -9,6 +9,30 @@ export interface ExportResolution {
   label: string;
 }
 
+// Mirrors WallpaperCanvas.tsx's getAspectDimensions() on-screen preview box widths.
+// The live preview draws text at literal `fontSizeSp` pixels inside a box of this
+// width (only `padding` is pre-scaled against it) — so for the export to reproduce
+// the exact same line-wrapping and proportions the user sees on screen, it must
+// scale everything off the SAME reference width the preview box actually uses,
+// not an arbitrary constant. Keep this in sync with getAspectDimensions().
+function getPreviewReferenceWidth(config: WallpaperConfig): number {
+  switch (config.aspectRatio) {
+    case '9:16': return 380;
+    case '16:9': return 640;
+    case '1:1': return 480;
+    case '3:4': return 420;
+    case '4:5': return 400;
+    case 'custom': {
+      const w = config.customWidth || 1080;
+      const h = config.customHeight || 1920;
+      const ratioValue = w / h;
+      const maxBoxPx = 480;
+      return ratioValue >= 1 ? maxBoxPx : maxBoxPx * ratioValue;
+    }
+    default: return 380;
+  }
+}
+
 // Reference numerals (chapter:verse, verse ranges) always render in this plain,
 // standard-digit font rather than the reference's decorative fontFamily —
 // display fonts (especially Telugu ones) often carry stylized or script-look
@@ -20,6 +44,20 @@ const STANDARD_NUMERAL_FONT = 'Inter';
 function splitRefSegments(text: string): { text: string; isNumeric: boolean }[] {
   const parts = text.split(/(\d+(?:[:\-–,]\d+)*)/g);
   return parts.filter((p) => p.length > 0).map((p) => ({ text: p, isNumeric: /^\d[\d:\-–,]*\d$|^\d$/.test(p) }));
+}
+
+/**
+ * Converts a #rrggbb hex color + 0-100 opacity into an rgba() string.
+ * Mirrors WallpaperCanvas.tsx's hexToRgba so the card backdrop tint matches
+ * the preview exactly.
+ */
+function hexToRgbaLocal(hex: string, opacityPct: number): string {
+  let h = (hex || '#000000').replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const r = parseInt(h.substring(0, 2), 16) || 0;
+  const g = parseInt(h.substring(2, 4), 16) || 0;
+  const b = parseInt(h.substring(4, 6), 16) || 0;
+  return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(100, opacityPct)) / 100})`;
 }
 
 /**
@@ -119,7 +157,7 @@ export async function renderWallpaperToCanvas(
   // the word before them. Explicitly loading + awaiting document.fonts.ready keeps
   // measurement and drawing consistent.
   try {
-    const previewScale = width / 400;
+    const previewScale = width / getPreviewReferenceWidth(config);
     const fontSpecs = new Set<string>();
     const addSpec = (family: string, weight: string, italic: boolean, sizeSp: number) => {
       const sizePx = Math.max(1, Math.round(sizeSp * previewScale));
@@ -167,7 +205,7 @@ export async function renderWallpaperToCanvas(
       const filters = [];
       if (bg.blur > 0) {
         // scale blur relative to canvas width
-        const scaledBlur = (bg.blur * (width / 400));
+        const scaledBlur = (bg.blur * (width / getPreviewReferenceWidth(config)));
         filters.push(`blur(${scaledBlur}px)`);
       }
       if (bg.brightness !== 100) filters.push(`brightness(${bg.brightness}%)`);
@@ -220,14 +258,65 @@ export async function renderWallpaperToCanvas(
     ctx.restore();
   }
 
+  // 3b. Draw Film Grain Texture (matches the preview's tiled SVG turbulence
+  // overlay, approximated here as tiled random noise composited with
+  // 'overlay' blending at the same 0.4 opacity).
+  if (bg.grain) {
+    const tileSize = 120;
+    const noiseCanvas = document.createElement('canvas');
+    noiseCanvas.width = tileSize;
+    noiseCanvas.height = tileSize;
+    const nctx = noiseCanvas.getContext('2d');
+    if (nctx) {
+      const imgData = nctx.createImageData(tileSize, tileSize);
+      for (let i = 0; i < imgData.data.length; i += 4) {
+        const v = Math.floor(Math.random() * 255);
+        imgData.data[i] = v;
+        imgData.data[i + 1] = v;
+        imgData.data[i + 2] = v;
+        imgData.data[i + 3] = 255;
+      }
+      nctx.putImageData(imgData, 0, 0);
+      const pattern = ctx.createPattern(noiseCanvas, 'repeat');
+      if (pattern) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'overlay';
+        ctx.globalAlpha = 0.4;
+        ctx.fillStyle = pattern;
+        ctx.fillRect(0, 0, width, height);
+        ctx.restore();
+      }
+    }
+  }
+
   // 4. Compute Dynamic Typography Metrics
-  const scale = width / 400; // Base reference scale from 400px preview
-  const paddingX = (config.padding ?? 24) * scale;
+  // `scale` reproduces the live preview's RAW (unscaled) CSS pixel values — font
+  // sizes, word spacing, highlight/shadow sizing, reference styling, etc. are all
+  // set as literal `Npx` in the preview with no adjustment for the preview box's
+  // on-screen size, so matching them here means scaling off the same reference
+  // width the preview box actually renders at for this aspect ratio.
+  //
+  // `padding` is the one exception: the preview deliberately pre-scales it by
+  // (boxWidth / 400) before applying it (see WallpaperCanvas.tsx), so it must be
+  // reproduced with that same /400 reference instead of `scale`, or the padded
+  // content width drifts from the preview.
+  const scale = width / getPreviewReferenceWidth(config);
+  const paddingScale = width / 400;
+  const paddingX = (config.padding ?? 24) * paddingScale;
   // Content Max Width narrows the text column (like the live preview's CSS maxWidth)
   // and centers it within the outer padded safe area.
   const availableWidth = width - (paddingX * 2);
-  const maxContentWidth = availableWidth * ((config.containerMaxWidth ?? 100) / 100);
-  const contentOffsetX = paddingX + (availableWidth - maxContentWidth) / 2;
+  const outerContentWidth = availableWidth * ((config.containerMaxWidth ?? 100) / 100);
+  const outerContentOffsetX = paddingX + (availableWidth - outerContentWidth) / 2;
+
+  // When the card backdrop is enabled, the preview's card div uses a fixed
+  // 28px inner padding (border-box), which eats into the space available to
+  // the actual words/reference/etc inside it. Mirror that here so the text
+  // wraps at the same width as the preview.
+  const cardEnabled = !!config.cardBackdrop?.enabled;
+  const cardPad = cardEnabled ? 28 * scale : 0;
+  const maxContentWidth = outerContentWidth - cardPad * 2;
+  const contentOffsetX = outerContentOffsetX + cardPad;
 
   // Measure and layout text items
   const showTe = config.layoutMode !== 'english-only';
@@ -338,21 +427,26 @@ export async function renderWallpaperToCanvas(
   const teluguLines = showTe ? layoutParagraph(teluguWordsMeta, wrapWidth) : [];
   const englishLines = showEn ? layoutParagraph(englishWordsMeta, wrapWidth) : [];
 
-  // Calculate total height needed
-  const lineSpacing = 16 * scale;
-  const sectionSpacing = 32 * scale;
-  
+  // Calculate total height needed.
+  // `wrapLineGap` matches the preview's flex-wrap `gap-y-1.5` (6px) between
+  // wrapped lines of the SAME paragraph. `sectionSpacing` matches the gap the
+  // preview produces between the Telugu and English blocks (their combined
+  // marginTop/marginBottom), so it now tracks config.sectionGap instead of a
+  // hardcoded constant.
+  const wrapLineGap = 6 * scale;
+  const sectionSpacing = (config.sectionGap ?? 16) * scale;
+
   let totalContentHeight = 0;
   const getLinesHeight = (lines: WordRenderMeta[][]) => {
-    return lines.reduce((acc, line) => {
+    return lines.reduce((acc, line, idx) => {
       const maxH = Math.max(...line.map(w => w.height), 20 * scale);
-      return acc + maxH + lineSpacing;
+      return acc + maxH + (idx < lines.length - 1 ? wrapLineGap : 0);
     }, 0);
   };
 
   const teHeight = showTe ? getLinesHeight(teluguLines) : 0;
   const enHeight = showEn ? getLinesHeight(englishLines) : 0;
-  const dividerHeight = (config.showDivider && showTe && showEn && !isSideBySide) ? 24 * scale : 0;
+  const dividerHeight = (config.showDivider && showTe && showEn && !isSideBySide) ? 8 * scale : 0;
   const showRef = (config.referenceStyle.showTeluguRef || config.referenceStyle.showEnglishRef)
     && (!!config.referenceTe || !!config.referenceEn);
   const isRefOnTop = config.referenceStyle.placement === 'top';
@@ -382,9 +476,17 @@ export async function renderWallpaperToCanvas(
     ? splitTopHeight + splitBottomHeight
     : (showRef ? singleRefBlockHeight : 0);
 
-  totalContentHeight = isSideBySide
+  // Decorative extras (cross icon, quote marks) add their own height, matching
+  // the preview's icon size + margin (cross: mb-4 ≈ 16px; quote marks: 28px
+  // icon each, tightened by -mb-2/-mt-2 ≈ 8px overlap into the text below/above).
+  const crossBlockHeight = config.showCross ? (config.crossSize * scale) + (16 * scale) : 0;
+  const quoteMarkHeight = config.quoteMarks ? (28 * scale) - (8 * scale) : 0;
+  const decorHeight = crossBlockHeight + quoteMarkHeight * 2;
+
+  totalContentHeight = (isSideBySide
     ? Math.max(teHeight, enHeight) + refHeight
-    : teHeight + enHeight + dividerHeight + refHeight + (showTe && showEn ? sectionSpacing : 0);
+    : teHeight + enHeight + dividerHeight + refHeight + (showTe && showEn ? sectionSpacing : 0))
+    + decorHeight + cardPad * 2;
 
   // Determine starting Y based on vertical alignment
   let currentY = (height - totalContentHeight) / 2;
@@ -485,7 +587,121 @@ export async function renderWallpaperToCanvas(
     ctx.restore();
   };
 
-  // Reference at Top: draw first, then push content down past it
+  // Everything from here (card backdrop, decorations, verse text, references)
+  // lives inside the preview's transformed content div, so wrap it in the same
+  // horizontal/vertical offset translation (percentages of the full canvas,
+  // matching the preview div's own w-full/h-full box).
+  ctx.save();
+  const offsetXpx = ((config.horizontalOffset ?? 0) / 100) * width;
+  const offsetYpx = ((config.verticalOffset ?? 0) / 100) * height;
+  ctx.translate(offsetXpx, offsetYpx);
+
+  // Card Backdrop: a translucent rounded panel behind all the content,
+  // matching the preview's cardBackdrop div (background/blur/border/shadow).
+  // True backdrop-filter blur is approximated by blurring a snapshot of
+  // what's been drawn so far within the card bounds, then compositing it
+  // back before the tint/border/shadow.
+  if (cardEnabled && config.cardBackdrop) {
+    const cb = config.cardBackdrop;
+    const cardLeft = outerContentOffsetX;
+    const cardTop = currentY;
+    const cardWidth = outerContentWidth;
+    const cardHeight = totalContentHeight;
+    const cardRadius = (cb.borderRadius ?? 16) * scale;
+
+    if (cb.blur > 0) {
+      try {
+        const snap = document.createElement('canvas');
+        snap.width = Math.max(1, Math.round(cardWidth));
+        snap.height = Math.max(1, Math.round(cardHeight));
+        const sctx = snap.getContext('2d');
+        if (sctx) {
+          // Copy the current canvas content under the card's (translated) bounds
+          sctx.drawImage(
+            canvas,
+            cardLeft + offsetXpx, cardTop + offsetYpx, cardWidth, cardHeight,
+            0, 0, cardWidth, cardHeight
+          );
+          ctx.save();
+          roundRectPath(ctx, cardLeft, cardTop, cardWidth, cardHeight, cardRadius);
+          ctx.clip();
+          ctx.filter = `blur(${cb.blur * scale}px)`;
+          ctx.drawImage(snap, cardLeft, cardTop, cardWidth, cardHeight);
+          ctx.restore();
+        }
+      } catch {
+        // Cross-origin background image can taint the canvas and block drawImage
+        // read-back — fall back to just the tint/border/shadow below.
+      }
+    }
+
+    ctx.save();
+    roundRectPath(ctx, cardLeft, cardTop, cardWidth, cardHeight, cardRadius);
+    ctx.fillStyle = hexToRgbaLocal(cb.color, cb.opacity);
+    if (cb.shadow) {
+      ctx.shadowColor = 'rgba(0,0,0,0.5)';
+      ctx.shadowBlur = 40 * scale;
+      ctx.shadowOffsetY = 20 * scale;
+    }
+    ctx.fill();
+    if (cb.border) {
+      ctx.shadowColor = 'transparent';
+      ctx.strokeStyle = hexToRgbaLocal(cb.borderColor, 30);
+      ctx.lineWidth = Math.max(1, scale);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  currentY += cardPad;
+
+  // Alignment anchor for decorative elements (cross, quote marks), matching
+  // the preview's getAlignClass applied to their wrapper divs.
+  const decorAnchorX = config.layoutAlignment === 'left'
+    ? contentOffsetX
+    : config.layoutAlignment === 'right'
+      ? contentOffsetX + maxContentWidth
+      : contentOffsetX + maxContentWidth / 2;
+  const decorTextAlign: CanvasTextAlign = config.layoutAlignment === 'left'
+    ? 'left'
+    : config.layoutAlignment === 'right'
+      ? 'right'
+      : 'center';
+
+  // Decorative Cross Icon
+  if (config.showCross) {
+    const crossSizePx = config.crossSize * scale;
+    const circleR = crossSizePx * 0.5 + 10 * scale;
+    const circleCx = config.layoutAlignment === 'left' ? decorAnchorX + circleR
+      : config.layoutAlignment === 'right' ? decorAnchorX - circleR
+      : decorAnchorX;
+    const circleCy = currentY + circleR - (4 * scale);
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.shadowColor = `${config.crossColor}66`;
+    ctx.shadowBlur = 20 * scale;
+    ctx.beginPath();
+    ctx.arc(circleCx, circleCy, circleR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = config.crossColor;
+    ctx.lineWidth = Math.max(1.5, crossSizePx * 0.09);
+    ctx.lineCap = 'round';
+    const half = crossSizePx / 2;
+    ctx.beginPath();
+    ctx.moveTo(circleCx, circleCy - half);
+    ctx.lineTo(circleCx, circleCy + half);
+    ctx.moveTo(circleCx - half * 0.6, circleCy - half * 0.25);
+    ctx.lineTo(circleCx + half * 0.6, circleCy - half * 0.25);
+    ctx.stroke();
+    ctx.restore();
+
+    currentY += crossBlockHeight;
+  }
+
+
   if (showRef && isRefOnTop) {
     const refFontSize = Math.round(config.referenceStyle.fontSizeSp * scale);
     drawReferenceBlock(currentY + refFontSize * 0.85);
@@ -500,11 +716,28 @@ export async function renderWallpaperToCanvas(
     currentY += splitTopHeight;
   }
 
-  // Draw Lines Helper — draws within [regionX, regionX+regionWidth] starting at startY, returns the ending Y
+  // Decorative Opening Quote Mark
+  const quoteColor = config.dividerColor || '#FBBF24';
+  if (config.quoteMarks) {
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = quoteColor;
+    ctx.font = `${Math.round(40 * scale)}px Georgia, serif`;
+    ctx.textAlign = decorTextAlign;
+    ctx.fillText('\u275D', decorAnchorX, currentY + 28 * scale);
+    ctx.restore();
+    currentY += quoteMarkHeight;
+  }
+
+  // Draw Lines Helper — draws within [regionX, regionX+regionWidth] starting at startY, returns the ending Y.
+  // Matches the preview's flex-wrap `gap-y-1.5` (6px) between wrapped lines of the
+  // SAME paragraph — distinct from the larger sectionGap margin applied between
+  // separate language blocks, which is added by the caller after this returns.
+  const wrapLineGap = 6 * scale;
   const drawLines = (lines: WordRenderMeta[][], startY: number, regionX: number, regionWidth: number): number => {
     const spaceWidth = (config.wordSpacing ?? 10) * scale;
     let y = startY;
-    for (const line of lines) {
+    lines.forEach((line, lineIdx) => {
       const lineHeight = Math.max(...line.map(w => w.height), 20 * scale);
       const totalLineWidth = line.reduce((sum, w, i) => sum + w.width + (i > 0 ? spaceWidth : 0), 0);
 
@@ -565,9 +798,94 @@ export async function renderWallpaperToCanvas(
         curX += w.width + spaceWidth;
       }
 
-      y += lineHeight + lineSpacing;
-    }
+      y += lineHeight + (lineIdx < lines.length - 1 ? wrapLineGap : 0);
+    });
     return y;
+  };
+
+  // Draws the stacked-layout divider at vertical position y, honoring
+  // dividerStyle/dividerColor/dividerWidth — matches the preview's five
+  // divider variants (minimal/gold-line/cross/dots/ornament/none) instead
+  // of always drawing a single plain line.
+  const drawDivider = (y: number) => {
+    const style = config.dividerStyle ?? 'minimal';
+    if (style === 'none') return;
+    const color = config.dividerColor || 'rgba(255,255,255,0.4)';
+    const divWidth = Math.min((config.dividerWidth || 60) * scale, maxContentWidth * 0.9);
+    const divStartX = decorAnchorX - (config.layoutAlignment === 'left' ? 0 : config.layoutAlignment === 'right' ? divWidth : divWidth / 2);
+
+    ctx.save();
+    if (style === 'gold-line') {
+      const grad = ctx.createLinearGradient(divStartX, y, divStartX + divWidth, y);
+      grad.addColorStop(0, 'transparent');
+      grad.addColorStop(0.5, color);
+      grad.addColorStop(1, 'transparent');
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = Math.max(1.5, 2 * scale);
+      ctx.beginPath();
+      ctx.moveTo(divStartX, y);
+      ctx.lineTo(divStartX + divWidth, y);
+      ctx.stroke();
+    } else if (style === 'cross') {
+      const segW = 14 * scale;
+      const gap = 12 * scale;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(1, scale);
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(decorAnchorX - gap / 2 - segW, y);
+      ctx.lineTo(decorAnchorX - gap / 2, y);
+      ctx.moveTo(decorAnchorX + gap / 2, y);
+      ctx.lineTo(decorAnchorX + gap / 2 + segW, y);
+      ctx.stroke();
+      // small plus mark in the middle
+      ctx.lineWidth = Math.max(1.5, 2 * scale);
+      const r = 6 * scale;
+      ctx.beginPath();
+      ctx.moveTo(decorAnchorX, y - r);
+      ctx.lineTo(decorAnchorX, y + r);
+      ctx.moveTo(decorAnchorX - r, y);
+      ctx.lineTo(decorAnchorX + r, y);
+      ctx.stroke();
+    } else if (style === 'dots') {
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.85;
+      const gap = 8 * scale;
+      const sizes = [3 * scale, 4 * scale, 3 * scale];
+      let dx = decorAnchorX - gap - sizes[1];
+      for (const r of sizes) {
+        ctx.beginPath();
+        ctx.arc(dx, y, r, 0, Math.PI * 2);
+        ctx.fill();
+        dx += gap + r;
+      }
+    } else if (style === 'ornament') {
+      const segW = 10 * scale;
+      const gap = 8 * scale;
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.9;
+      ctx.lineWidth = Math.max(1, scale);
+      ctx.beginPath();
+      ctx.moveTo(decorAnchorX - gap / 2 - segW, y);
+      ctx.lineTo(decorAnchorX - gap / 2, y);
+      ctx.moveTo(decorAnchorX + gap / 2, y);
+      ctx.lineTo(decorAnchorX + gap / 2 + segW, y);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = color;
+      ctx.font = `${Math.round(13 * scale)}px serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('\u2767', decorAnchorX, y + 4 * scale);
+    } else {
+      // minimal (default)
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(1.5, 2 * scale);
+      ctx.beginPath();
+      ctx.moveTo(divStartX, y);
+      ctx.lineTo(divStartX + divWidth, y);
+      ctx.stroke();
+    }
+    ctx.restore();
   };
 
   if (isSideBySide && showTe && showEn) {
@@ -575,17 +893,19 @@ export async function renderWallpaperToCanvas(
     const teEndY = teluguLines.length > 0 ? drawLines(teluguLines, currentY, contentOffsetX, colWidth) : currentY;
     const enEndY = englishLines.length > 0 ? drawLines(englishLines, currentY, contentOffsetX + colWidth + columnGap, colWidth) : currentY;
 
-    if (config.showDivider) {
-      ctx.save();
-      ctx.strokeStyle = config.dividerColor || 'rgba(255,255,255,0.4)';
-      ctx.lineWidth = Math.max(2, 2 * scale);
-      const divX = contentOffsetX + colWidth + columnGap / 2;
-      ctx.beginPath();
-      ctx.moveTo(divX, currentY - (20 * scale));
-      ctx.lineTo(divX, Math.max(teEndY, enEndY) - (16 * scale));
-      ctx.stroke();
-      ctx.restore();
-    }
+    // The preview always renders a subtle column separator here
+    // (`w-px self-stretch bg-white/15`), independent of the showDivider /
+    // dividerColor / dividerWidth settings — those only apply to the stacked
+    // layout's divider. Match that fixed style exactly, unconditionally.
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = Math.max(1, scale);
+    const divX = contentOffsetX + colWidth + columnGap / 2;
+    ctx.beginPath();
+    ctx.moveTo(divX, currentY);
+    ctx.lineTo(divX, Math.max(teEndY, enEndY));
+    ctx.stroke();
+    ctx.restore();
 
     currentY = Math.max(teEndY, enEndY);
   } else {
@@ -600,18 +920,11 @@ export async function renderWallpaperToCanvas(
     }
 
     if (config.showDivider && showTe && showEn) {
-      currentY += 8 * scale;
-      ctx.save();
-      ctx.strokeStyle = config.dividerColor || 'rgba(255,255,255,0.4)';
-      ctx.lineWidth = Math.max(2, 2 * scale);
-      const divWidth = Math.min(100 * scale, maxContentWidth * 0.5);
-      const divStartX = contentOffsetX + (maxContentWidth - divWidth) / 2;
-      ctx.beginPath();
-      ctx.moveTo(divStartX, currentY);
-      ctx.lineTo(divStartX + divWidth, currentY);
-      ctx.stroke();
-      ctx.restore();
-      currentY += 28 * scale;
+      currentY += sectionSpacing / 2;
+      drawDivider(currentY);
+      currentY += sectionSpacing / 2;
+    } else if (showTe && showEn) {
+      currentY += sectionSpacing;
     }
 
     if (secondShow && secondLines.length > 0) {
@@ -627,12 +940,28 @@ export async function renderWallpaperToCanvas(
     }
   }
 
+  // Decorative Closing Quote Mark
+  if (config.quoteMarks) {
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = quoteColor;
+    ctx.font = `${Math.round(40 * scale)}px Georgia, serif`;
+    ctx.textAlign = decorTextAlign;
+    ctx.fillText('\u275E', decorAnchorX, currentY + 28 * scale);
+    ctx.restore();
+    currentY += quoteMarkHeight;
+  }
+
   // 4. Draw Reference Badge (bottom placement only — top was drawn earlier;
   // split places its two halves inline with each language block instead)
   if (showRef && !isRefOnTop && !canSplit) {
     currentY += refGap;
     drawReferenceBlock(currentY);
   }
+
+  // End of offset-translated content block (card backdrop, decorations, text,
+  // references) started right before "Reference at Top" above.
+  ctx.restore();
 
   // 5. Draw Watermark if enabled
   if (config.showWatermark && config.watermarkText) {
